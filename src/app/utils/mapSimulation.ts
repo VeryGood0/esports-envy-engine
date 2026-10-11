@@ -1,3 +1,4 @@
+import { getRatingWeight, mapDataConfidence, ratingBlend } from './settings';
 import {
   ActiveDutyMap,
   ACTIVE_DUTY_MAPS,
@@ -44,12 +45,18 @@ export function calculateMapMatchup(
   // 1. Overall Team baseline factor (weight ~25%)
   const overallDiff = profA.overallRating - profB.overallRating;
   const overallFormDiff = profA.currentForm - profB.currentForm;
-  const overallComponent = overallDiff * 0.20 + overallFormDiff * 0.08;
+  const blend = ratingBlend(
+    getRatingWeight(),
+    mapDataConfidence(statsA.mapsPlayed || 0, statsB.mapsPlayed || 0)
+  );
+  const pointsDiff = ((teamA.points || 0) - (teamB.points || 0)) / 40;
+  const overallComponent =
+    (overallDiff * 0.20 + overallFormDiff * 0.08) * blend.overallScale + pointsDiff * blend.pointsScale;
 
   // 2. Map-Specific factor (weight ~55%) — PRIMARY DRIVER
   const mapRatingDiff = statsA.mapRating - statsB.mapRating;
   const mapFormDiff = statsA.currentForm - statsB.currentForm;
-  const mapComponent = mapRatingDiff * 0.42 + mapFormDiff * 0.15;
+  const mapComponent = (mapRatingDiff * 0.42 + mapFormDiff * 0.15) * blend.mapScale;
 
   // 3. Win rate and opponent difficulty factor (weight ~15%)
   const effectiveWRA = statsA.mapsPlayed > 0 ? statsA.winRate * ((statsA.opponentsStrength || 80) / 80) : 50;
