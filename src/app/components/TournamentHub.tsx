@@ -1185,6 +1185,88 @@ export const TournamentHub: React.FC<TournamentHubProps> = ({
       }
     }
 
+    // Run GSL group stages before the playoffs. The old full-tournament
+    // simulation only handled Swiss and playoff matches, so a GSL event could
+    // stop with all group matches waiting to be played.
+    if (currentTour.mode === 'gsl_groups' && currentTour.currentStage === 'groups') {
+      // Reconcile already-finished matches too. This repairs saved tournaments
+      // from an earlier version where results were finished but the group
+      // qualifiers/current stage had not been propagated correctly.
+      const previouslyFinished = [...(currentTour.groupMatches || [])].filter(
+        (m) => m.status === 'finished' && !!m.teamAId && !!m.teamBId
+      );
+      for (const finished of previouslyFinished) {
+        const { updatedTournament } = updateGroupMatchResult(
+          currentTour,
+          finished.id,
+          finished.scoreA,
+          finished.scoreB,
+          finished.format
+        );
+        currentTour = updatedTournament;
+      }
+
+      let groupLoops = 0;
+      while (currentTour.currentStage === 'groups' && groupLoops < 100) {
+        groupLoops++;
+        const nextGroupMatch = (currentTour.groupMatches || []).find(
+          (m) => m.status === 'ready' && !!m.teamAId && !!m.teamBId
+        );
+        if (!nextGroupMatch) break;
+
+        const tA = teams.find((t) => t.id === nextGroupMatch.teamAId);
+        const tB = teams.find((t) => t.id === nextGroupMatch.teamBId);
+        if (!tA || !tB) break;
+
+        const veto = executeCompleteAutoVeto(nextGroupMatch.format, tA, tB);
+        const seriesResult = simulateSeriesOnVeto(nextGroupMatch.format, tA, tB, veto.selectedMapsInOrder);
+        const sA = seriesResult.seriesScoreA;
+        const sB = seriesResult.seriesScoreB;
+        const deltas = applyMatchEffects(
+          nextGroupMatch,
+          sA,
+          sB,
+          seriesResult.winnerTeamId,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          nextGroupMatch.format,
+          seriesResult.mapsPlayed
+        );
+
+        const { updatedTournament } = updateGroupMatchResult(
+          currentTour,
+          nextGroupMatch.id,
+          sA,
+          sB,
+          nextGroupMatch.format
+        );
+        const enrichedGroupMatches = (updatedTournament.groupMatches || []).map((m) =>
+          m.id === nextGroupMatch.id
+            ? {
+                ...m,
+                deltaPointsA: deltas.deltaPointsA,
+                deltaPointsB: deltas.deltaPointsB,
+                deltaFormA: deltas.deltaFormA,
+                deltaFormB: deltas.deltaFormB,
+                mapsPlayed: seriesResult.mapsPlayed,
+                vetoState: veto
+              }
+            : m
+        );
+        const enrichedGroups = (updatedTournament.groups || []).map((group) => ({
+          ...group,
+          matches: (group.matches || []).map((m) => enrichedGroupMatches.find((updated) => updated.id === m.id) || m)
+        }));
+        currentTour = {
+          ...updatedTournament,
+          groups: enrichedGroups,
+          groupMatches: enrichedGroupMatches
+        };
+      }
+    }
+
     // Now advance playoffs completely
     let pMatches = [...currentTour.playoffMatches];
     let isDone = false;

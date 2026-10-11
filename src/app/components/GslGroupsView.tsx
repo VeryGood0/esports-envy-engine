@@ -42,7 +42,7 @@ export const GslGroupsView: React.FC<GslGroupsViewProps> = ({
 
   // Check if all groups have determined their 2 playoff qualifiers
   const requiredQualifiers = (group: TournamentGroup) =>
-    group.groupStyle === 'gsl_top3' || group.groupStyle === 'gsl_8' || group.groupStyle === 'gsl' || (group.teamIds.length >= 8 && group.groupStyle !== 'round_robin') ? 3 : 2;
+    group.groupStyle === 'gsl_top3' || group.teamIds.length >= 8 ? 3 : 2;
   const allGroupsComplete =
     groups.length > 0 &&
     groups.every((g) => g.qualifiedTeamIds && g.qualifiedTeamIds.length >= requiredQualifiers(g));
@@ -192,13 +192,19 @@ export const GslGroupsView: React.FC<GslGroupsViewProps> = ({
           <div className="flex items-center gap-2">
             <Flame className="w-4 h-4 text-amber-400" />
             <h3 className="text-sm font-bold text-white uppercase tracking-wider font-mono">
-              {groups.some((g) => g.groupStyle === 'gsl_8' || (g.teamIds.length >= 8 && g.groupStyle !== 'round_robin')) ? 'Групповой этап · Double Elimination · 2 группы по 8' : groups.some((g) => g.groupStyle === 'gsl_top3') ? 'Групповой этап · GSL Top 3' : 'Групповой этап · GSL 2 победы / 2 поражения'}
+              {groups.some((g) => g.groupStyle === 'gsl_top3')
+                ? 'Групповой этап · GSL: 3 команды проходят'
+                : groups.some((g) => g.teamIds.length >= 8)
+                  ? 'Групповой этап · GSL на 8 команд: верхняя и нижняя сетки'
+                  : 'Групповой этап · GSL: 2 места в плей-офф'}
             </h3>
           </div>
           <p className="text-xs text-slate-400 mt-0.5">
-            {groups.some((g) => g.groupStyle === 'gsl_8' || (g.teamIds.length >= 8 && g.groupStyle !== 'round_robin'))
-              ? 'В группах по 8: Double Elimination, перекрёстный переход проигравших Upper Semi-final в нижнюю сетку. Победитель Upper Final — 1-е место, проигравший — 2-е, победитель Lower Final — 3-е.'
-              : 'В группах по 4: после Opening round играются Winners’ match и Elimination match. Победитель Winners — 1-е место, проигравший — 2-е; победитель Elimination занимает 3-е. Decider нет.'}
+            {groups.some((g) => g.groupStyle === 'gsl_top3')
+              ? 'В группе 4 команды: победитель Upper Final сразу выходит в полуфинал, команды со 2-го и 3-го мест играют четвертьфиналы, 4-е место выбывает.'
+              : groups.some((g) => g.teamIds.length >= 8)
+                ? 'В группе 8 команд действует Double Elimination: поражение отправляет в нижнюю сетку, второе поражение означает вылет. В плей-офф выходят 3 команды из группы.'
+                : 'В группе 4 команды: победитель Winners’ Match сразу занимает 1-е место. Проигравший играет Decider с победителем Elimination Match за 2-е место. В плей-офф выходят две команды из каждой группы.'}
           </p>
         </div>
 
@@ -259,8 +265,8 @@ export const GslGroupsView: React.FC<GslGroupsViewProps> = ({
           const upperSemis = [getGslMatch('u2_1'), getGslMatch('u2_2')].filter(Boolean) as TournamentMatch[];
           const lowerRound1 = [getGslMatch('l1_1'), getGslMatch('l1_2')].filter(Boolean) as TournamentMatch[];
           const lowerSemis = [getGslMatch('l2_1'), getGslMatch('l2_2')].filter(Boolean) as TournamentMatch[];
-          const upperFinal = getGslMatch('uf') || winners;
-          const lowerFinal = getGslMatch('ls') || elim;
+          const upperFinal = getGslMatch('uf');
+          const lowerFinal = getGslMatch('ls');
           const requiredPlaces = requiredQualifiers(group);
 
           return (
@@ -391,7 +397,7 @@ export const GslGroupsView: React.FC<GslGroupsViewProps> = ({
               )}
 
               {/* Four-team GSL Top 3 layout: Upper final assigns places 1-2, Lower final assigns 3-4. */}
-              {group.teamIds.length === 4 && (
+              {group.groupStyle === 'gsl_top3' && (
                 <div className="space-y-4">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="rounded-2xl border border-slate-800 bg-[#080c14] p-4 space-y-3">
@@ -410,12 +416,12 @@ export const GslGroupsView: React.FC<GslGroupsViewProps> = ({
                     <div className="rounded-2xl border border-slate-800 bg-[#080c14] p-4 space-y-4">
                       <div className="space-y-2">
                         <div className="text-[11px] font-mono uppercase tracking-wider text-amber-400 font-bold flex items-center gap-1.5"><Trophy className="w-3.5 h-3.5" /> Winners' match / Upper final</div>
-                        {renderGslMatchCard(upperFinal, "Winners' match · 1-е / 2-е место", true, false)}
-                        <p className="text-[10px] font-mono text-slate-500">Победитель занимает 1-е место и сразу выходит в полуфинал. Проигравший занимает 2-е место и выходит в четвертьфинал другой стороны сетки.</p>
+                        {renderGslMatchCard(upperFinal, 'Upper final · 1st / 2nd place', true, false)}
+                        <p className="text-[10px] font-mono text-slate-500">Победитель занимает 1-е место и сразу выходит в полуфинал. Проигравший занимает 2-е место.</p>
                       </div>
                       <div className="border-t border-slate-800 pt-3 space-y-2">
-                        <div className="text-[11px] font-mono uppercase tracking-wider text-indigo-400 font-bold flex items-center gap-1.5"><GitBranch className="w-3.5 h-3.5" /> Elimination match / Lower final</div>
-                        {renderGslMatchCard(lowerFinal, 'Elimination match · 3-е место', true, false)}
+                        <div className="text-[11px] font-mono uppercase tracking-wider text-indigo-400 font-bold flex items-center gap-1.5"><GitBranch className="w-3.5 h-3.5" /> Lower final / Матч за 3-е место</div>
+                        {renderGslMatchCard(lowerFinal, 'Lower final · 3rd / 4th place', true, false)}
                         <p className="text-[10px] font-mono text-slate-500">Победитель занимает 3-е место и выходит в четвертьфинал. Проигравший выбывает.</p>
                       </div>
                     </div>
@@ -430,7 +436,7 @@ export const GslGroupsView: React.FC<GslGroupsViewProps> = ({
               )}
 
               {/* Upper Section: Opening Round & Winners' Match */}
-              <div className={group.teamIds.length >= 8 || group.teamIds.length === 4 ? 'hidden' : 'space-y-3'}>
+              <div className={group.teamIds.length >= 8 || group.groupStyle === 'gsl_top3' ? 'hidden' : 'space-y-3'}>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   {/* Column 1: Opening round (2 matches) */}
                   <div className="space-y-3">
@@ -451,36 +457,36 @@ export const GslGroupsView: React.FC<GslGroupsViewProps> = ({
                         </button>
                       )}
                     </div>
-                    {renderGslMatchCard(m1, 'Матч #1', false, group.teamIds.length !== 4)}
-                    {renderGslMatchCard(m2, 'Матч #2', false, group.teamIds.length !== 4)}
+                    {renderGslMatchCard(m1, 'Opening Round · Match 1', false, group.teamIds.length !== 4)}
+                    {renderGslMatchCard(m2, 'Opening Round · Match 2', false, group.teamIds.length !== 4)}
                   </div>
 
                   {/* Column 2: Winners' match */}
                   <div className="space-y-3 flex flex-col justify-center">
                     <div className="text-[11px] font-mono uppercase tracking-wider text-amber-400 font-bold flex items-center gap-1.5">
                       <Trophy className="w-3.5 h-3.5" />
-                      <span>Winners' match</span>
+                      <span>Winners' Match / Upper Final</span>
                     </div>
-                    {renderGslMatchCard(winners, 'Победитель → Плей-офф #1', true, group.teamIds.length !== 4)}
+                    {renderGslMatchCard(winners, 'За 1-е место · прямой выход в полуфинал', true, group.teamIds.length !== 4)}
                     <span className="text-[10px] font-mono text-slate-500">
-                      Победитель выходит в плей-офф с 1-го места группы
+                      Победитель занимает 1-е место и сразу выходит в полуфинал. Проигравший отправляется в Decider Match.
                     </span>
                   </div>
                 </div>
               </div>
 
               {/* Lower Section: Elimination match & Decider match */}
-              <div className={group.teamIds.length >= 8 || group.teamIds.length === 4 ? 'hidden' : 'pt-4 border-t border-slate-800/80 space-y-3'}>
+              <div className={group.teamIds.length >= 8 || group.groupStyle === 'gsl_top3' ? 'hidden' : 'pt-4 border-t border-slate-800/80 space-y-3'}>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   {/* Elimination match */}
                   <div className="space-y-3">
                     <div className="text-[11px] font-mono uppercase tracking-wider text-rose-400 font-bold flex items-center gap-1.5">
                       <ShieldAlert className="w-3.5 h-3.5" />
-                      <span>Elimination match</span>
+                      <span>Elimination Match / нижняя сетка</span>
                     </div>
-                    {renderGslMatchCard(elim, 'Матч на вылет', false, group.teamIds.length !== 4)}
+                    {renderGslMatchCard(elim, 'Elimination Match · матч на вылет', false, group.teamIds.length !== 4)}
                     <span className="text-[10px] font-mono text-slate-500">
-                      Проигравший выбывает из турнира
+                      Проигравший выбывает. Победитель выходит в Decider Match за последнее место в плей-офф.
                     </span>
                   </div>
 
@@ -488,18 +494,18 @@ export const GslGroupsView: React.FC<GslGroupsViewProps> = ({
                   <div className="space-y-3">
                     <div className="text-[11px] font-mono uppercase tracking-wider text-indigo-400 font-bold flex items-center gap-1.5">
                       <GitBranch className="w-3.5 h-3.5" />
-                      <span>Decider match</span>
+                      <span>Decider Match / матч за 2-е место</span>
                     </div>
-                    {renderGslMatchCard(decider, 'Решающий матч → Плей-офф #2', true, group.teamIds.length !== 4)}
+                    {renderGslMatchCard(decider, 'Decider Match · за 2-е место', true, group.teamIds.length !== 4)}
                     <span className="text-[10px] font-mono text-slate-500">
-                      Победитель выходит в плей-офф со 2-го места группы
+                      Здесь встречаются проигравший Winners’ Match и победитель Elimination Match. Победитель проходит в полуфинал, проигравший выбывает.
                     </span>
                   </div>
                 </div>
               </div>
 
               {/* Group Qualification Results Card */}
-              {group.teamIds.length < 8 && group.teamIds.length !== 4 && (q1 || q2) && (
+              {group.teamIds.length < 8 && group.groupStyle !== 'gsl_top3' && (q1 || q2) && (
                 <div className="p-3.5 rounded-2xl bg-gradient-to-r from-emerald-950/20 via-slate-900/60 to-slate-900 border border-emerald-500/30 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs font-mono">
                   <div className="flex items-center gap-3">
                     <Award className="w-4 h-4 text-emerald-400 shrink-0" />

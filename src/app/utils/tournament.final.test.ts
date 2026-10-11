@@ -163,6 +163,76 @@ describe('third-place match and 8-team GSL loser routing', () => {
 });
 
 
+describe('classic four-team GSL progression and semifinals', () => {
+  const makeTeams = () => Array.from({ length: 8 }, (_, i) => ({
+    id: `classic-gsl-team-${i + 1}`,
+    name: `Classic GSL Team ${i + 1}`,
+    shortName: `CG${i + 1}`,
+    points: 1500 - i,
+    defaultPoints: 1500 - i,
+    logoUrl: '',
+    primaryColor: '#000000',
+    secondaryColor: '#ffffff',
+    country: 'Test',
+    region: 'Test',
+    rosterSnippet: []
+  } as any));
+
+  it('sends Winners loser to Decider, Elimination winner to Decider, and advances two teams per group directly to semifinals', () => {
+    let tournament = createCustomTournament({
+      name: 'Classic GSL playoffs',
+      mode: 'gsl_groups',
+      teams: makeTeams(),
+      stageFormats: { groupCount: 2, groupStyle: 'gsl', groupFormat: 'BO3', semifinalFormat: 'BO3' }
+    });
+
+    let guard = 0;
+    while (tournament.currentStage !== 'playoffs' && guard++ < 30) {
+      const ready = (tournament.groupMatches || []).find((m) => m.status === 'ready' && m.teamAId && m.teamBId);
+      expect(ready).toBeTruthy();
+      tournament = updateGroupMatchResult(tournament, ready!.id, 2, 0, 'BO3').updatedTournament;
+    }
+
+    expect(tournament.currentStage).toBe('playoffs');
+    expect(tournament.groups).toHaveLength(2);
+
+    const groupA = tournament.groups!.find((g) => g.letter === 'A')!;
+    const groupB = tournament.groups!.find((g) => g.letter === 'B')!;
+    for (const group of [groupA, groupB]) {
+      const winners = group.matches.find((m) => m.poolKey === `gsl_${group.letter}_winners`)!;
+      const elim = group.matches.find((m) => m.poolKey === `gsl_${group.letter}_elim`)!;
+      const decider = group.matches.find((m) => m.poolKey === `gsl_${group.letter}_decider`)!;
+      expect(winners.status).toBe('finished');
+      expect(elim.status).toBe('finished');
+      expect(decider.status).toBe('finished');
+      expect(decider.teamAId).toBe(winners.loserId);
+      expect(decider.teamBId).toBe(elim.winnerId);
+      expect(group.qualifiedTeamIds).toEqual([winners.winnerId, decider.winnerId]);
+      expect(group.eliminatedTeamIds).toContain(elim.loserId);
+      expect(group.eliminatedTeamIds).toContain(decider.loserId);
+    }
+
+    // Two groups send exactly four teams; no quarterfinals/play-ins are created.
+    expect(tournament.playoffMatches.some((m) => m.poolKey.startsWith('qf'))).toBe(false);
+    const sf1 = tournament.playoffMatches.find((m) => m.poolKey === 'sf1')!;
+    const sf2 = tournament.playoffMatches.find((m) => m.poolKey === 'sf2')!;
+    expect(sf1.status).toBe('ready');
+    expect(sf2.status).toBe('ready');
+    expect(sf1.teamAId).toBe(groupA.qualifiedTeamIds![0]);
+    expect(sf1.teamBId).toBe(groupB.qualifiedTeamIds![1]);
+    expect(sf2.teamAId).toBe(groupB.qualifiedTeamIds![0]);
+    expect(sf2.teamBId).toBe(groupA.qualifiedTeamIds![1]);
+
+    let playoffMatches = tournament.playoffMatches;
+    playoffMatches = updatePlayoffMatchResult(playoffMatches, sf1.id, 2, 0, false, 'BO3').updatedMatches;
+    playoffMatches = updatePlayoffMatchResult(playoffMatches, sf2.id, 0, 2, false, 'BO3').updatedMatches;
+    const grandFinal = playoffMatches.find((m) => m.poolKey === 'final')!;
+    expect(grandFinal.status).toBe('ready');
+    expect(grandFinal.teamAId).toBe(sf1.teamAId);
+    expect(grandFinal.teamBId).toBe(sf2.teamBId);
+  });
+});
+
 describe('four-team GSL formats', () => {
   const makeTeams = (count: number) => Array.from({ length: count }, (_, i) => ({
     id: `format-team-${i + 1}`,
