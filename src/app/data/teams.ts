@@ -131,6 +131,22 @@ const BASE_TEAMS: Team[] = [
     trophies: []
   },
   {
+    id: 'fut',
+    name: 'FUT',
+    shortName: 'FUT',
+    points: 1714,
+    defaultPoints: 1714,
+    logoUrl: '/logos/fut.webp',
+    primaryColor: '#ff0037',
+    secondaryColor: '#18181b',
+    country: 'EU',
+    region: 'Европа',
+    rosterSnippet: ['xfl0ud', 'dem0n', 'Krabeni', 'SunPayus', 'dziugss'],
+    coach: 'coolio',
+    trophiesCount: 0,
+    trophies: []
+  },
+  {
     id: 'betboom',
     name: 'BETBOOM',
     shortName: 'BB',
@@ -211,6 +227,22 @@ const BASE_TEAMS: Team[] = [
     trophies: []
   },
   {
+    id: 'nemiga',
+    name: 'Nemiga',
+    shortName: 'Nemiga',
+    points: 1492,
+    defaultPoints: 1492,
+    logoUrl: '/logos/nemiga.webp',
+    primaryColor: '#e52629',
+    secondaryColor: '#0d0d0f',
+    country: 'CIS',
+    region: 'Европа',
+    rosterSnippet: ['KaiR0N-', 'Xant3r', 'robo', 'KhaN', 'syph0'],
+    coach: 'boX',
+    trophiesCount: 0,
+    trophies: []
+  },
+  {
     id: 'nip',
     name: 'Ninjas in Pyjamas',
     shortName: 'NiP',
@@ -221,7 +253,7 @@ const BASE_TEAMS: Team[] = [
     secondaryColor: '#142307',
     country: 'SE / EU',
     region: 'Европа',
-    rosterSnippet: ['REZ', 'alex', 'ewjerkz', 'jocab', 'r1nkle'],
+    rosterSnippet: ['stavn', 'sjuush', 'Krimbo', 'adamb', 'xKacpersky'],
     coach: 'Xizt',
     trophiesCount: 0,
     trophies: []
@@ -243,6 +275,38 @@ const BASE_TEAMS: Team[] = [
     trophies: []
   },
   {
+    id: 'liquid',
+    name: 'Liquid',
+    shortName: 'Liquid',
+    points: 1484,
+    defaultPoints: 1484,
+    logoUrl: '/logos/liquid.webp',
+    primaryColor: '#001538',
+    secondaryColor: '#EEEEEE',
+    country: 'NA',
+    region: 'Южная Америка',
+    rosterSnippet: ['NAF', 'EliGE', 'JT', 'VLDN', 'Jorko'],
+    coach: 'flashie',
+    trophiesCount: 0,
+    trophies: []
+  },
+  {
+    id: 'dendele',
+    name: 'DENDELE',
+    shortName: 'DENDELE',
+    points: 1358,
+    defaultPoints: 1358,
+    logoUrl: '/logos/dendele.webp',
+    primaryColor: '#0a429b',
+    secondaryColor: '#f1be22',
+    country: 'BR',
+    region: 'Южная Америка',
+    rosterSnippet: ['gafolo', 'koala', 'maxxkor', 'rdnzao', 'doc'],
+    coach: 'coachi',
+    trophiesCount: 0,
+    trophies: []
+  },
+  {
     id: 'tyloo',
     name: 'TYLOO',
     shortName: 'TYL',
@@ -255,6 +319,22 @@ const BASE_TEAMS: Team[] = [
     region: 'Азия',
     rosterSnippet: ['JamYoung', 'Jee', 'Mercury', 'Moseyuh', 'Zero'],
     coach: 'zhokiNg',
+    trophiesCount: 0,
+    trophies: []
+  },
+  {
+    id: 'themongolz',
+    name: 'The MongolZ',
+    shortName: 'TMZ',
+    points: 1250,
+    defaultPoints: 1250,
+    logoUrl: '/logos/themongolz.webp',
+    primaryColor: '#e5b842',
+    secondaryColor: '#0a0a0b',
+    country: 'MN',
+    region: 'Азия',
+    rosterSnippet: ['bLitz', 'Techno', '910', 'tikauk', 'DarkMeister'],
+    coach: 'maaRaa',
     trophiesCount: 0,
     trophies: []
   },
