@@ -32,7 +32,7 @@ describe('eight-team GSL groups and six-team playoff seeding', () => {
       name: 'GSL test',
       mode: 'gsl_groups',
       teams: makeTeams(),
-      stageFormats: { groupCount: 2, groupStyle: 'gsl', groupFormat: 'BO1' }
+      stageFormats: { groupCount: 2, groupStyle: 'gsl_double_elim_8', groupFormat: 'BO1' }
     });
 
     expect(tournament.groups).toHaveLength(2);
@@ -74,12 +74,12 @@ describe('eight-team GSL groups and six-team playoff seeding', () => {
 
     expect(groupA.qualifiedTeamIds).toHaveLength(3);
     expect(groupB.qualifiedTeamIds).toHaveLength(3);
-    expect(qf1.teamAId).toBe(groupA.qualifiedTeamIds?.[1]);
-    expect(qf1.teamBId).toBe(groupB.qualifiedTeamIds?.[2]);
-    expect(qf2.teamAId).toBe(groupB.qualifiedTeamIds?.[1]);
-    expect(qf2.teamBId).toBe(groupA.qualifiedTeamIds?.[2]);
-    expect(sf1.teamAId).toBe(groupB.qualifiedTeamIds?.[0]);
-    expect(sf2.teamAId).toBe(groupA.qualifiedTeamIds?.[0]);
+    expect(qf1.teamAId).toBe(groupB.qualifiedTeamIds?.[1]);
+    expect(qf1.teamBId).toBe(groupA.qualifiedTeamIds?.[2]);
+    expect(qf2.teamAId).toBe(groupA.qualifiedTeamIds?.[1]);
+    expect(qf2.teamBId).toBe(groupB.qualifiedTeamIds?.[2]);
+    expect(sf1.teamAId).toBe(groupA.qualifiedTeamIds?.[0]);
+    expect(sf2.teamAId).toBe(groupB.qualifiedTeamIds?.[0]);
   });
 });
 
