@@ -812,6 +812,14 @@ export function seedPlayoffsFromSwiss(
  * Updates a playoff match result and automatically propagates winners and losers
  * to the next rounds (Semi-finals, Grand Final, and 3rd place decider).
  */
+/** Strict Grand Final detection (never matches quarter/semi/UB/LB finals). */
+export function isGrandFinalMatch(m: { id: string; poolKey?: string }): boolean {
+  const pk = (m.poolKey || '').toLowerCase();
+  if (pk) return pk === 'final' || pk === 'playoff_final' || pk === 'grand_final';
+  const id = m.id.toLowerCase();
+  return id === 'playoff_final' || (id.endsWith('_final') && !id.endsWith('_ub_final') && !id.endsWith('_lb_final'));
+}
+
 export function updatePlayoffMatchResult(
   playoffMatches: TournamentMatch[],
   matchId: string,
@@ -862,14 +870,7 @@ export function updatePlayoffMatchResult(
   }
 
   // Propagate to Grand Final
-  const final = matches.find(
-    (m) =>
-      m.id === 'playoff_final' ||
-      m.poolKey === 'final' ||
-      m.id.endsWith('_final') ||
-      m.name.toLowerCase().includes('гранд') ||
-      m.name.toLowerCase().includes('финал')
-  );
+  const final = matches.find((m) => isGrandFinalMatch(m));
   if (final) {
     if (sf1?.winnerId) final.teamAId = sf1.winnerId;
     if (sf2?.winnerId) final.teamBId = sf2.winnerId;
@@ -897,7 +898,7 @@ export function updatePlayoffMatchResult(
   }
 
   // Tournament is completed when the Grand Final is finished
-  const finalFinished = final?.status === 'finished';
+  const finalFinished = final?.status === 'finished' && !!final.winnerId && match.id === final.id;
   const isTournamentOver = !!finalFinished;
 
   return { updatedMatches: matches, isTournamentOver };
@@ -962,14 +963,7 @@ export function computeFinalTournamentStandings(
     customBounties ||
     calculateTournamentVrsBounties(tier, allTeams, teamCount);
 
-  const finalMatch = playoffMatches.find(
-    (m) =>
-      m.id === 'playoff_final' ||
-      m.poolKey === 'final' ||
-      m.id.endsWith('_final') ||
-      m.name.toLowerCase().includes('гранд') ||
-      m.name.toLowerCase().includes('grand')
-  );
+  const finalMatch = playoffMatches.find((m) => isGrandFinalMatch(m));
   const thirdMatch = playoffMatches.find(
     (m) =>
       m.id === 'playoff_3rd' ||

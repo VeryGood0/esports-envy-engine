@@ -589,6 +589,9 @@ export const TournamentHub: React.FC<TournamentHubProps> = ({
 
   // Helper to finalize tournament victory, award dynamic VRS points, and add trophy
   const finalizeTournamentVictory = (tourState: TournamentState): TournamentState => {
+    // Guard: never award the title twice for the same tournament
+    if (tourState.currentStage === 'completed') return tourState;
+    const alreadyAwarded = teams.some((t) => (t.trophies || []).some((tr) => tr.tournamentId === tourState.id));
     const tourTier =
       tourState.tier ||
       (tourState.name?.toLowerCase().includes('major') ? 'Major' : 'S-Tier');
@@ -604,7 +607,7 @@ export const TournamentHub: React.FC<TournamentHubProps> = ({
     const thirdId = standings[2]?.teamId;
     const tourTitle = tourState.name || 'CS2 Championship';
 
-    if (onUpdateTeams && champId) {
+    if (onUpdateTeams && champId && !alreadyAwarded) {
       const finalistTeam = teams.find((t) => t.id === finalistId);
       const updatedTeams = teams.map((t) => {
         if (t.id === champId) {
