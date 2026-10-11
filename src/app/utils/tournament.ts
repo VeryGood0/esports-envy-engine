@@ -1823,7 +1823,8 @@ export function createCustomTournament(params: CreateTournamentParams): Tourname
     const groupCount = Math.max(2, Math.min(reqGroupCount, Math.floor(teamCount / 4) || 2));
     const configuredGroupStyle = stageFormats.groupStyle || (mode === 'gsl_groups' ? 'gsl' : 'round_robin');
     const isTop3Gsl = configuredGroupStyle === 'gsl_top3';
-    const isGsl = mode === 'gsl_groups' || configuredGroupStyle === 'gsl' || isTop3Gsl;
+    const isEightTeamGsl = configuredGroupStyle === 'gsl_8';
+    const isGsl = mode === 'gsl_groups' || configuredGroupStyle === 'gsl' || isTop3Gsl || isEightTeamGsl;
 
     const groups: TournamentGroup[] = [];
     const allGroupMatches: TournamentMatch[] = [];
@@ -1874,7 +1875,7 @@ export function createCustomTournament(params: CreateTournamentParams): Tourname
           // upper-final loser: that team is already 2nd place and qualifies directly for playoffs.
           add('l1_1', 'Lower round 1 · Match 1', 2, `gsl_${gLetter}_u1_1`, 'loser', `gsl_${gLetter}_u1_2`, 'loser');
           add('l1_2', 'Lower round 1 · Match 2', 2, `gsl_${gLetter}_u1_3`, 'loser', `gsl_${gLetter}_u1_4`, 'loser');
-          const routeUpperLosersAcross = stageFormats.gslLowerSemiLoserRouting !== 'same';
+          const routeUpperLosersAcross = isEightTeamGsl || stageFormats.gslLowerSemiLoserRouting !== 'same';
           add('l2_1', 'Lower semi-final 1', 3, `gsl_${gLetter}_l1_1`, 'winner', `gsl_${gLetter}_${routeUpperLosersAcross ? 'u2_2' : 'u2_1'}`, 'loser');
           add('l2_2', 'Lower semi-final 2', 3, `gsl_${gLetter}_l1_2`, 'winner', `gsl_${gLetter}_${routeUpperLosersAcross ? 'u2_1' : 'u2_2'}`, 'loser');
           add('ls', 'Lower final · 3rd place', 4, `gsl_${gLetter}_l2_1`, 'winner', `gsl_${gLetter}_l2_2`, 'winner');
@@ -1938,13 +1939,13 @@ export function createCustomTournament(params: CreateTournamentParams): Tourname
 
     let playoffMatches: TournamentMatch[] = [];
 
-    if (groupCount === 2 && (teamCount >= 16 || isTop3Gsl || configuredGroupStyle === 'gsl')) {
+    if (groupCount === 2 && (isEightTeamGsl || isTop3Gsl || configuredGroupStyle === 'gsl')) {
       // Six-team playoffs: group winners receive byes to the semifinals.
       playoffMatches = [
-        { id: 'playoff_qf1', stage: 'playoffs', poolKey: 'qf1', roundNumber: 1, name: 'Четвертьфинал 1 (2-е место A vs 3-е место B)', scoreA: 0, scoreB: 0, format: qfFmt, status: 'scheduled' },
-        { id: 'playoff_qf2', stage: 'playoffs', poolKey: 'qf2', roundNumber: 1, name: 'Четвертьфинал 2 (2-е место B vs 3-е место A)', scoreA: 0, scoreB: 0, format: qfFmt, status: 'scheduled' },
-        { id: 'playoff_sf1', stage: 'playoffs', poolKey: 'sf1', roundNumber: 2, name: 'Полуфинал 1 (1-е место B vs победитель QF1)', scoreA: 0, scoreB: 0, format: sfFmt, status: 'scheduled', directSeedA: true },
-        { id: 'playoff_sf2', stage: 'playoffs', poolKey: 'sf2', roundNumber: 2, name: 'Полуфинал 2 (1-е место A vs победитель QF2)', scoreA: 0, scoreB: 0, format: sfFmt, status: 'scheduled', directSeedA: true },
+        { id: 'playoff_qf1', stage: 'playoffs', poolKey: 'qf1', roundNumber: 1, name: 'Четвертьфинал 1 (2-е место B vs 3-е место A)', scoreA: 0, scoreB: 0, format: qfFmt, status: 'scheduled' },
+        { id: 'playoff_qf2', stage: 'playoffs', poolKey: 'qf2', roundNumber: 1, name: 'Четвертьфинал 2 (2-е место A vs 3-е место B)', scoreA: 0, scoreB: 0, format: qfFmt, status: 'scheduled' },
+        { id: 'playoff_sf1', stage: 'playoffs', poolKey: 'sf1', roundNumber: 2, name: 'Полуфинал 1 (1-е место A vs победитель QF1)', scoreA: 0, scoreB: 0, format: sfFmt, status: 'scheduled', directSeedA: true },
+        { id: 'playoff_sf2', stage: 'playoffs', poolKey: 'sf2', roundNumber: 2, name: 'Полуфинал 2 (1-е место B vs победитель QF2)', scoreA: 0, scoreB: 0, format: sfFmt, status: 'scheduled', directSeedA: true },
         { id: 'playoff_final', stage: 'playoffs', poolKey: 'final', roundNumber: 3, name: 'Гранд-финал', scoreA: 0, scoreB: 0, format: finalFmt, status: 'scheduled' }
       ];
       if (includeThirdPlace) {
@@ -2005,7 +2006,7 @@ export function createCustomTournament(params: CreateTournamentParams): Tourname
           status: 'scheduled'
         });
       }
-    } else if (groupCount === 4 && isTop3Gsl) {
+    } else if (groupCount === 4 && (isTop3Gsl || configuredGroupStyle === 'gsl')) {
       // Twelve qualifiers: the four group winners skip the play-in and enter the QFs.
       const r12Pairs = [
         ['r12_1', '2-е место A vs 3-е место B'],
@@ -2047,7 +2048,7 @@ export function createCustomTournament(params: CreateTournamentParams): Tourname
 
 /**
  * Updates a Group stage match (GSL or Round Robin) and propagates winners/losers
- * through the GSL tree (Opening -> Winners/Elim -> Decider -> Playoffs).
+ * through the GSL tree (Opening -> Winners/Elimination -> Playoffs, or the 8-team double-elimination bracket).
  */
 export function updateGroupMatchResult(
   tournament: TournamentState,
@@ -2180,7 +2181,7 @@ export function updateGroupMatchResult(
   const groupsList = currentTour.groups || [];
   const allGroupsFinished =
     groupsList.length > 0 &&
-    groupsList.every((g) => g.qualifiedTeamIds && g.qualifiedTeamIds.length >= ((g.groupStyle === 'gsl_top3' || g.groupStyle === 'gsl' || g.teamIds.length >= 8) ? 3 : 2));
+    groupsList.every((g) => g.qualifiedTeamIds && g.qualifiedTeamIds.length >= ((g.groupStyle === 'gsl_top3' || g.groupStyle === 'gsl_8' || g.groupStyle === 'gsl' || (g.teamIds.length >= 8 && g.groupStyle !== 'round_robin')) ? 3 : 2));
 
   if (allGroupsFinished) {
     // Populate playoff bracket with group qualifiers!
@@ -2194,17 +2195,17 @@ export function updateGroupMatchResult(
     const seed1B = groupB?.qualifiedTeamIds?.[0];
     const seed2B = groupB?.qualifiedTeamIds?.[1];
 
-    if (groupsList.length === 2 && (((groupA?.teamIds.length || 0) >= 8) || currentTour.stageFormats?.groupStyle === 'gsl_top3') && currentTour.playoffMatches) {
+    if (groupsList.length === 2 && (['gsl_top3', 'gsl_8', 'gsl'].includes(currentTour.stageFormats?.groupStyle || groupA?.groupStyle || '') || (((groupA?.teamIds.length || 0) >= 8) && groupA?.groupStyle !== 'round_robin')) && currentTour.playoffMatches) {
       const seed3A = groupA?.qualifiedTeamIds?.[2];
       const seed3B = groupB?.qualifiedTeamIds?.[2];
       const qf1 = currentTour.playoffMatches.find((m) => m.poolKey === 'qf1');
       const qf2 = currentTour.playoffMatches.find((m) => m.poolKey === 'qf2');
       const sf1 = currentTour.playoffMatches.find((m) => m.poolKey === 'sf1');
       const sf2 = currentTour.playoffMatches.find((m) => m.poolKey === 'sf2');
-      if (qf1) { qf1.teamAId = seed2A; qf1.teamBId = seed3B; qf1.status = qf1.teamAId && qf1.teamBId ? 'ready' : 'scheduled'; }
-      if (qf2) { qf2.teamAId = seed2B; qf2.teamBId = seed3A; qf2.status = qf2.teamAId && qf2.teamBId ? 'ready' : 'scheduled'; }
-      if (sf1) { sf1.teamAId = seed1B; sf1.status = sf1.teamAId && sf1.teamBId ? 'ready' : 'scheduled'; }
-      if (sf2) { sf2.teamAId = seed1A; sf2.status = sf2.teamAId && sf2.teamBId ? 'ready' : 'scheduled'; }
+      if (qf1) { qf1.teamAId = seed2B; qf1.teamBId = seed3A; qf1.status = qf1.teamAId && qf1.teamBId ? 'ready' : 'scheduled'; }
+      if (qf2) { qf2.teamAId = seed2A; qf2.teamBId = seed3B; qf2.status = qf2.teamAId && qf2.teamBId ? 'ready' : 'scheduled'; }
+      if (sf1) { sf1.teamAId = seed1A; sf1.status = sf1.teamAId && sf1.teamBId ? 'ready' : 'scheduled'; }
+      if (sf2) { sf2.teamAId = seed1B; sf2.status = sf2.teamAId && sf2.teamBId ? 'ready' : 'scheduled'; }
     } else if (groupsList.length === 2 && currentTour.playoffMatches) {
       // 2 Groups -> 4 teams into Semifinals
       const sf1 = currentTour.playoffMatches.find((m) => m.poolKey === 'sf1');
@@ -2220,7 +2221,7 @@ export function updateGroupMatchResult(
         sf2.teamBId = seed2A;
         sf2.status = 'ready';
       }
-    } else if (groupsList.length === 4 && currentTour.stageFormats?.groupStyle === 'gsl_top3' && currentTour.playoffMatches) {
+    } else if (groupsList.length === 4 && ['gsl_top3', 'gsl'].includes(currentTour.stageFormats?.groupStyle || '') && currentTour.playoffMatches) {
       // Four groups of four produce twelve qualifiers. Group winners receive QF byes;
       // second/third place teams play a cross-group play-in before the quarterfinals.
       const seed1C = groupC?.qualifiedTeamIds?.[0];
