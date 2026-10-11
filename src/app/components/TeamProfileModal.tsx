@@ -4,7 +4,7 @@ import { Team, MatchPrediction, TeamFormStats, Trophy as TrophyType, TrophyMatch
 import { TeamLogo } from './TeamLogo';
 import { MAP_METADATA } from '../data/mapPool';
 import { getTeamProfile } from '../utils/mapSimulation';
-import { getTournamentMatchChronologicalRank } from '../utils/tournament';
+import { getTournamentMatchChronologicalRank, normalizeTrophyMatchStageName } from '../utils/tournament';
 import {
   X,
   Trophy,
@@ -65,7 +65,10 @@ export const TeamProfileModal: React.FC<TeamProfileModalProps> = ({
     let list: TrophyMatchSummary[] = [];
 
     if (selectedTrophy.matchesPlayed && selectedTrophy.matchesPlayed.length > 0) {
-      list = [...selectedTrophy.matchesPlayed];
+      list = selectedTrophy.matchesPlayed.map((match) => ({
+        ...match,
+        stageName: normalizeTrophyMatchStageName(match)
+      }));
     } else {
       const runnerUp =
         teams.find(
@@ -250,6 +253,14 @@ export const TeamProfileModal: React.FC<TeamProfileModalProps> = ({
 
     // Normalize stages to fix any mislabeled matches from previous runs
     const cleanList = list.map((m) => {
+      const canonicalStage = normalizeTrophyMatchStageName(m);
+      // A legacy GSL Classic final may have roundNumber=2, which the old
+      // round-based fallback incorrectly labeled as a semifinal. Trust the
+      // match id/pool key before applying these heuristic labels.
+      if (canonicalStage.startsWith('Гранд-Финал') || canonicalStage.startsWith('Матч за 3-е место')) {
+        return { ...m, stageName: canonicalStage };
+      }
+
       const s = (m.stageName || '').toLowerCase();
       const pk = (m.poolKey || '').toLowerCase();
       const id = (m.id || '').toLowerCase();
@@ -270,9 +281,11 @@ export const TeamProfileModal: React.FC<TeamProfileModalProps> = ({
 
       const isThird =
         pk.includes('3rd') ||
-        pk.includes('third') ||
-        id.includes('3rd') ||
-        s.includes('3-е') ||
+        pk === 'third_place' ||
+        pk === 'third' ||
+        id === 'playoff_3rd' ||
+        id.endsWith('_third_place') ||
+        s.includes('матч за 3-е место') ||
         s.includes('бронз');
 
       const isSwiss =
@@ -1080,9 +1093,11 @@ export const TeamProfileModal: React.FC<TeamProfileModalProps> = ({
                         m.id?.toLowerCase().includes('sf');
 
                       const isThird =
-                        m.stageName.toLowerCase().includes('3-е') ||
+                        m.stageName.toLowerCase().includes('матч за 3-е место') ||
                         m.stageName.toLowerCase().includes('бронз') ||
-                        m.poolKey?.toLowerCase().includes('3rd');
+                        m.poolKey?.toLowerCase().includes('3rd') ||
+                        m.poolKey?.toLowerCase() === 'third_place' ||
+                        m.poolKey?.toLowerCase() === 'third';
 
                       const isSwiss =
                         m.stageName.toLowerCase().includes('швейцар') ||

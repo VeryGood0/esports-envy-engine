@@ -1,5 +1,5 @@
 // @ts-nocheck -- imported legacy code written for a looser tsconfig
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   TournamentState,
   TournamentMatch,
@@ -32,7 +32,10 @@ import {
   calculateTournamentMatchDeltas,
   seedPlayoffsFromSwiss,
   extractTeamTournamentMatches,
-  createCustomTournament
+  createCustomTournament,
+  isEightTeamGslTournament,
+  isThirdPlaceMatch,
+  isGrandFinalMatch
 } from '../utils/tournament';
 import { executeCompleteAutoVeto } from '../utils/vetoEngine';
 import { simulateSeriesOnVeto } from '../utils/mapSimulation';
@@ -109,6 +112,217 @@ export const TournamentHub: React.FC<TournamentHubProps> = ({
     matchId: string;
     slot: 'A' | 'B';
   } | null>(null);
+
+  // Helper to finalize tournament victory, award dynamic VRS points, and add trophy.
+  // Kept above the empty-state return so the repair effect below can safely use it.
+  const finalizeTournamentVictory = (tourState: TournamentState): TournamentState => {
+    // Do not award the title or VRS points twice. A legacy tournament can be
+    // marked completed without ever recording its trophy, so allow that state
+    // to be repaired once the final results are present.
+    const alreadyAwarded = teams.some((t) => (t.trophies || []).some((tr) => tr.tournamentId === tourState.id));
+    if (tourState.currentStage === 'completed' && alreadyAwarded) return tourState;
+    const tourTier =
+      tourState.tier ||
+      (tourState.name?.toLowerCase().includes('major') ? 'Major' : 'S-Tier');
+    const bounties = calculateTournamentVrsBounties(
+      tourTier,
+      teams,
+      tourState.teamCount || 16
+    );
+    const standings = computeFinalTournamentStandings(tourState, teams, bounties);
+
+    const champId = standings[0]?.teamId;
+    const finalistId = standings[1]?.teamId;
+    const thirdId = standings[2]?.teamId;
+    const tourTitle = tourState.name || 'CS2 Championship';
+
+    if (onUpdateTeams && champId && !alreadyAwarded) {
+      const finalistTeam = teams.find((t) => t.id === finalistId);
+      const updatedTeams = teams.map((t) => {
+        if (t.id === champId) {
+          const currentTrophies = t.trophies || [];
+          const champMatches = extractTeamTournamentMatches(tourState, champId, teams);
+          const newTrophy = {
+            id: `tr_${Date.now()}`,
+            tournamentId: tourState.id,
+            name: tourTitle,
+            year: new Date().getFullYear(),
+            date: new Date().toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' }),
+            tier: tourTier,
+            vrsPointsAwarded: bounties.championBonus,
+            runnerUpTeamName: finalistTeam?.name,
+            runnerUpTeamId: finalistId,
+            teamCount: tourState.teamCount || 16,
+            mode: tourState.mode,
+            matchesPlayed: champMatches
+          };
+          return {
+            ...t,
+            trophiesCount: currentTrophies.length + 1,
+            trophies: [newTrophy, ...currentTrophies]
+          };
+        }
+        return t;
+      });
+      onUpdateTeams(updatedTeams);
+      if (onApplyVrsPoints) {
+        const awards = [
+          ...(champId ? [{ teamId: champId, delta: bounties.championBonus }] : []),
+          ...(finalistId ? [{ teamId: finalistId, delta: bounties.finalistBonus }] : []),
+          ...(thirdId && (tourState.includeThirdPlace || tourState.playoffMatches.some(isThirdPlaceMatch)) ? [{ teamId: thirdId, delta: bounties.thirdPlaceBonus }] : [])
+        ];
+        onApplyVrsPoints(awards);
+      }
+    }
+
+    const completedTour: TournamentState = {
+      ...tourState,
+      currentStage: 'completed',
+      standings,
+      tier: tourTier,
+      championVrsBonus: bounties.championBonus
+    };
+    setIsResultsOpen(true);
+    soundFx.playVictory();
+    return completedTour;
+  };
+
+  // Repair old saved 8-team GSL tournaments and recover finals that were already
+  // played before the third-place routing bug was fixed. This also lets the normal
+  // App archive effect see currentStage="completed" and save the event.
+  useEffect(() => {
+    if (!tournament) return;
+
+    let workingTour = tournament;
+    if (isEightTeamGslTournament(workingTour)) {
+      const matches = [...(workingTour.playoffMatches || [])];
+      const sf1 = matches.find((match) => match.poolKey === 'sf1');
+      const sf2 = matches.find((match) => match.poolKey === 'sf2');
+      const loserOf = (match?: TournamentMatch) => match?.loserId || (
+        match?.winnerId ? (match.winnerId === match.teamAId ? match.teamBId : match.teamAId) : undefined
+      );
+      const existingThirdIndex = matches.findIndex(isThirdPlaceMatch);
+      const expectedA = loserOf(sf1);
+      const expectedB = loserOf(sf2);
+      let repaired = !workingTour.includeThirdPlace || existingThirdIndex < 0;
+
+      if (existingThirdIndex < 0) {
+        const teamAId = expectedA;
+        const teamBId = expectedB;
+        matches.push({
+          id: 'playoff_3rd',
+          stage: 'playoffs',
+          poolKey: 'third_place',
+          roundNumber: Math.max(sf1?.roundNumber || 2, sf2?.roundNumber || 2) + 1,
+          name: 'Матч за 3-е место (Бронзовый финал)',
+          teamAId,
+          teamBId,
+          scoreA: 0,
+          scoreB: 0,
+          format: sf1?.format || workingTour.stageFormats?.semifinalFormat || 'BO3',
+          status: teamAId && teamBId ? 'ready' : 'scheduled'
+        });
+        repaired = true;
+      } else {
+        const oldThird = matches[existingThirdIndex];
+        // Never rewrite a completed bronze result. Before it's played, use the
+        // actual semifinal losers when available, instead of requiring manual seeding.
+        if (oldThird.status !== 'finished') {
+          const teamAId = expectedA || oldThird.teamAId;
+          const teamBId = expectedB || oldThird.teamBId;
+          const status = teamAId && teamBId ? 'ready' : 'scheduled';
+          if (oldThird.teamAId !== teamAId || oldThird.teamBId !== teamBId || oldThird.status !== status) {
+            matches[existingThirdIndex] = { ...oldThird, teamAId, teamBId, status };
+            repaired = true;
+          }
+        }
+      }
+
+      if (repaired) {
+        const restoredThird = matches.find(isThirdPlaceMatch);
+        const restoredFinal = matches.find(isGrandFinalMatch);
+        const mustReopenForBronze = workingTour.currentStage === 'completed'
+          && !!(restoredFinal?.status === 'finished' && restoredFinal.winnerId)
+          && !(restoredThird?.status === 'finished' && restoredThird.winnerId);
+        workingTour = {
+          ...workingTour,
+          currentStage: mustReopenForBronze ? 'playoffs' : workingTour.currentStage,
+          includeThirdPlace: true,
+          playoffMatches: matches
+        };
+        onUpdateTournament(workingTour);
+        return;
+      }
+
+      // Some older builds finished the event as soon as the Grand Final ended,
+      // even though an 8-team GSL must still play the bronze match. Reopen those
+      // saved events so the semifinal losers can be routed and the result counted.
+      const oldFinal = matches.find(isGrandFinalMatch);
+      const oldBronze = matches.find(isThirdPlaceMatch);
+      if (workingTour.currentStage === 'completed'
+        && oldFinal?.status === 'finished' && oldFinal.winnerId
+        && !(oldBronze?.status === 'finished' && oldBronze.winnerId)) {
+        onUpdateTournament({
+          ...workingTour,
+          currentStage: 'playoffs',
+          includeThirdPlace: true,
+          playoffMatches: matches
+        });
+        return;
+      }
+    }
+
+    const finalMatch = (workingTour.playoffMatches || []).find(isGrandFinalMatch);
+    const bronzeMatch = (workingTour.playoffMatches || []).find(isThirdPlaceMatch);
+    const finalFinished = !!(finalMatch?.status === 'finished' && finalMatch.winnerId);
+    const bronzeFinished = !bronzeMatch || (bronzeMatch.status === 'finished' && !!bronzeMatch.winnerId);
+
+    if (workingTour.currentStage === 'completed') {
+      const championTeam = teams.find((team) => team.id === finalMatch?.winnerId);
+      const championTrophy = (championTeam?.trophies || []).find((trophy) => trophy.tournamentId === workingTour.id);
+      const championTrophyExists = !!championTrophy;
+      if (!championTrophyExists && finalFinished && bronzeFinished) {
+        onUpdateTournament(finalizeTournamentVictory({
+          ...workingTour,
+          includeThirdPlace: workingTour.includeThirdPlace || !!bronzeMatch
+        }));
+      } else if (championTrophyExists && finalFinished && bronzeFinished) {
+        // Recalculate legacy standings when an older build misidentified a
+        // quarterfinal containing the seed label `3-е место` as the bronze match.
+        // Preserve existing VRS values while correcting actual team placements.
+        const oldStandings = workingTour.standings || [];
+        const valueForPlace = (place: number) => oldStandings.find((standing) => standing.place === place)?.vrsAwarded || 0;
+        const correctedStandings = computeFinalTournamentStandings(workingTour, teams, {
+          championBonus: championTrophy.vrsPointsAwarded || workingTour.championVrsBonus || valueForPlace(1),
+          finalistBonus: valueForPlace(2),
+          thirdPlaceBonus: valueForPlace(3)
+        });
+        const placementsMatch = oldStandings.length === correctedStandings.length
+          && correctedStandings.every((standing, index) => {
+            const old = oldStandings[index];
+            return old?.place === standing.place
+              && old?.teamId === standing.teamId
+              && old?.placeLabel === standing.placeLabel;
+          });
+        if (!placementsMatch) {
+          onUpdateTournament({
+            ...workingTour,
+            standings: correctedStandings,
+            includeThirdPlace: workingTour.includeThirdPlace || !!bronzeMatch
+          });
+        }
+      }
+      return;
+    }
+
+    if (finalFinished && bronzeFinished) {
+      const completedTour = finalizeTournamentVictory({
+        ...workingTour,
+        includeThirdPlace: workingTour.includeThirdPlace || !!bronzeMatch
+      });
+      onUpdateTournament(completedTour);
+    }
+  }, [tournament, teams, onUpdateTournament, onUpdateTeams, onApplyVrsPoints]);
 
   // If no tournament has been created yet, show the Tournament Creation Hub
   if (!tournament) {
@@ -517,9 +731,10 @@ export const TournamentHub: React.FC<TournamentHubProps> = ({
 
   // 10. Toggle 3rd Place match
   const handleToggleThirdPlace = () => {
+    if (isEightTeamGslTournament(tournament)) return;
     const nextInclude = !tournament.includeThirdPlace;
     let playoffMatches = [...(tournament.playoffMatches || [])];
-    const existingThird = playoffMatches.find((match) => match.poolKey === 'third_place' || match.poolKey === 'third' || match.id.endsWith('_third_place') || match.name.toLowerCase().includes('3-е место'));
+    const existingThird = playoffMatches.find(isThirdPlaceMatch);
     if (nextInclude && !existingThird) {
       const sf1 = playoffMatches.find((match) => match.poolKey === 'sf1');
       const sf2 = playoffMatches.find((match) => match.poolKey === 'sf2');
@@ -628,76 +843,6 @@ export const TournamentHub: React.FC<TournamentHubProps> = ({
     };
   };
 
-  // Helper to finalize tournament victory, award dynamic VRS points, and add trophy
-  const finalizeTournamentVictory = (tourState: TournamentState): TournamentState => {
-    // Guard: never award the title twice for the same tournament
-    if (tourState.currentStage === 'completed') return tourState;
-    const alreadyAwarded = teams.some((t) => (t.trophies || []).some((tr) => tr.tournamentId === tourState.id));
-    const tourTier =
-      tourState.tier ||
-      (tourState.name?.toLowerCase().includes('major') ? 'Major' : 'S-Tier');
-    const bounties = calculateTournamentVrsBounties(
-      tourTier,
-      teams,
-      tourState.teamCount || 16
-    );
-    const standings = computeFinalTournamentStandings(tourState, teams, bounties);
-
-    const champId = standings[0]?.teamId;
-    const finalistId = standings[1]?.teamId;
-    const thirdId = standings[2]?.teamId;
-    const tourTitle = tourState.name || 'CS2 Championship';
-
-    if (onUpdateTeams && champId && !alreadyAwarded) {
-      const finalistTeam = teams.find((t) => t.id === finalistId);
-      const updatedTeams = teams.map((t) => {
-        if (t.id === champId) {
-          const currentTrophies = t.trophies || [];
-          const champMatches = extractTeamTournamentMatches(tourState, champId, teams);
-          const newTrophy = {
-            id: `tr_${Date.now()}`,
-            tournamentId: tourState.id,
-            name: tourTitle,
-            year: new Date().getFullYear(),
-            date: new Date().toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' }),
-            tier: tourTier,
-            vrsPointsAwarded: bounties.championBonus,
-            runnerUpTeamName: finalistTeam?.name,
-            runnerUpTeamId: finalistId,
-            teamCount: tourState.teamCount || 16,
-            mode: tourState.mode,
-            matchesPlayed: champMatches
-          };
-          return {
-            ...t,
-            trophiesCount: currentTrophies.length + 1,
-            trophies: [newTrophy, ...currentTrophies]
-          };
-        }
-        return t;
-      });
-      onUpdateTeams(updatedTeams);
-      if (onApplyVrsPoints) {
-        const awards = [
-          ...(champId ? [{ teamId: champId, delta: bounties.championBonus }] : []),
-          ...(finalistId ? [{ teamId: finalistId, delta: bounties.finalistBonus }] : []),
-          ...(thirdId && tourState.includeThirdPlace ? [{ teamId: thirdId, delta: bounties.thirdPlaceBonus }] : [])
-        ];
-        onApplyVrsPoints(awards);
-      }
-    }
-
-    const completedTour: TournamentState = {
-      ...tourState,
-      currentStage: 'completed',
-      standings,
-      tier: tourTier,
-      championVrsBonus: bounties.championBonus
-    };
-    setIsResultsOpen(true);
-    soundFx.playVictory();
-    return completedTour;
-  };
 
   // 11. Confirm Match Result from Simulation Modal
   const handleConfirmMatchResult = (
@@ -1783,7 +1928,8 @@ export const TournamentHub: React.FC<TournamentHubProps> = ({
           linkPlayoffsToSwiss={tournament.linkPlayoffsToSwiss !== false}
           onToggleLinkSwiss={handleToggleLinkSwiss}
           qualifiedRecords={Object.values(tournament.swissRecords).filter((r) => r.status === 'qualified')}
-          includeThirdPlace={tournament.includeThirdPlace}
+          includeThirdPlace={tournament.includeThirdPlace || isEightTeamGslTournament(tournament)}
+          thirdPlaceRequired={isEightTeamGslTournament(tournament)}
           onToggleThirdPlace={handleToggleThirdPlace}
           onOpenMatch={(m) => setActiveMatchToSimulate(m)}
           onQuickSimulateMatch={handleQuickSimulateMatch}

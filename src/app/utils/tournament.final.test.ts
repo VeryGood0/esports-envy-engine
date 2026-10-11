@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { createCustomTournament, createEmptyPlayoffBracket, updateGroupMatchResult, updatePlayoffMatchResult } from './tournament';
+import { createCustomTournament, createEmptyPlayoffBracket, updateGroupMatchResult, updatePlayoffMatchResult, computeFinalTournamentStandings, normalizeTrophyMatchStageName, isThirdPlaceMatch } from './tournament';
 
 describe('playoff final detection', () => {
   it('finishing a quarterfinal does not end the tournament', () => {
@@ -132,11 +132,12 @@ describe('third-place match and 8-team GSL loser routing', () => {
     expect(progressedA.matches.find((match) => match.poolKey === 'gsl_A_l2_2')?.teamBId).toBe(upper1.loserId);
   });
 
-  it('creates a third-place playoff for GSL groups when enabled', () => {
+  it('requires a third-place playoff for eight-team GSL groups even if the option was off', () => {
     const tournament = createCustomTournament({
-      name: 'GSL third place', mode: 'gsl_groups', teams: makeTeams(), includeThirdPlace: true,
-      stageFormats: { groupCount: 2, groupStyle: 'gsl' }
+      name: 'GSL third place', mode: 'gsl_groups', teams: makeTeams(), includeThirdPlace: false,
+      stageFormats: { groupCount: 2, groupStyle: 'gsl_double_elim_8' }
     });
+    expect(tournament.includeThirdPlace).toBe(true);
     expect(tournament.playoffMatches.some((match) => match.poolKey === 'third_place')).toBe(true);
   });
 
@@ -334,3 +335,75 @@ describe('four-team GSL formats', () => {
     expect(afterPlayIn.updatedMatches.find((match) => match.poolKey === 'qf1')?.status).toBe('ready');
   });
 });
+
+describe('8-team GSL playoff bronze-match completion and trophy labels', () => {
+  const teams = Array.from({ length: 16 }, (_, i) => ({
+    id: `bronze-team-${i + 1}`,
+    name: `Bronze Team ${i + 1}`,
+    shortName: `B${i + 1}`,
+    points: 1500 - i,
+    defaultPoints: 1500 - i,
+    logoUrl: '',
+    primaryColor: '#000000',
+    secondaryColor: '#ffffff',
+    country: 'Test',
+    region: 'Test',
+    rosterSnippet: [],
+    trophies: []
+  } as any));
+
+  const initialMatches = [
+    { id: 'playoff_qf1', stage: 'playoffs', poolKey: 'qf1', roundNumber: 1, name: 'Четвертьфинал 1 (2-е место B vs 3-е место A)', teamAId: teams[1].id, teamBId: teams[2].id, scoreA: 0, scoreB: 0, format: 'BO3', status: 'ready' },
+    { id: 'playoff_qf2', stage: 'playoffs', poolKey: 'qf2', roundNumber: 1, name: 'Четвертьфинал 2 (2-е место A vs 3-е место B)', teamAId: teams[3].id, teamBId: teams[4].id, scoreA: 0, scoreB: 0, format: 'BO3', status: 'ready' },
+    { id: 'playoff_sf1', stage: 'playoffs', poolKey: 'sf1', roundNumber: 2, name: 'Semifinal 1', teamAId: teams[0].id, scoreA: 0, scoreB: 0, format: 'BO3', status: 'scheduled', directSeedA: true },
+    { id: 'playoff_sf2', stage: 'playoffs', poolKey: 'sf2', roundNumber: 2, name: 'Semifinal 2', teamAId: teams[5].id, scoreA: 0, scoreB: 0, format: 'BO3', status: 'scheduled', directSeedA: true },
+    { id: 'playoff_final', stage: 'playoffs', poolKey: 'final', roundNumber: 3, name: 'Grand Final', scoreA: 0, scoreB: 0, format: 'BO5', status: 'scheduled' },
+    { id: 'playoff_3rd', stage: 'playoffs', poolKey: 'third_place', roundNumber: 3, name: 'Матч за 3-е место (Бронзовый финал)', scoreA: 0, scoreB: 0, format: 'BO3', status: 'scheduled' }
+  ] as any[];
+
+  it('automatically routes semifinal losers into bronze and waits for bronze before completing', () => {
+    let matches = updatePlayoffMatchResult(initialMatches as any, 'playoff_qf1', 2, 0, false, 'BO3').updatedMatches;
+    matches = updatePlayoffMatchResult(matches, 'playoff_qf2', 0, 2, false, 'BO3').updatedMatches;
+    matches = updatePlayoffMatchResult(matches, 'playoff_sf1', 0, 2, false, 'BO3').updatedMatches;
+    matches = updatePlayoffMatchResult(matches, 'playoff_sf2', 2, 0, false, 'BO3').updatedMatches;
+
+    const sf1 = matches.find((match) => match.poolKey === 'sf1')!;
+    const sf2 = matches.find((match) => match.poolKey === 'sf2')!;
+    const bronze = matches.find((match) => match.poolKey === 'third_place')!;
+    expect(bronze.teamAId).toBe(sf1.loserId);
+    expect(bronze.teamBId).toBe(sf2.loserId);
+    expect(bronze.status).toBe('ready');
+
+    const final = matches.find((match) => match.poolKey === 'final')!;
+    const afterFinal = updatePlayoffMatchResult(matches, final.id, 3, 1, false, 'BO5');
+    expect(afterFinal.isTournamentOver).toBe(false);
+
+    const afterBronze = updatePlayoffMatchResult(afterFinal.updatedMatches, bronze.id, 2, 0, false, 'BO3');
+    expect(afterBronze.isTournamentOver).toBe(true);
+
+    const tournament = {
+      mode: 'gsl_groups',
+      tier: 'S-Tier',
+      teamCount: 16,
+      playoffMatches: afterBronze.updatedMatches,
+      swissRecords: {}
+    } as any;
+    const standings = computeFinalTournamentStandings(tournament, teams, {
+      championBonus: 100, finalistBonus: 40, thirdPlaceBonus: 20
+    });
+    const bronzeResult = afterBronze.updatedMatches.find((match) => match.poolKey === 'third_place')!;
+    expect(standings.find((standing) => standing.place === 3)?.teamId).toBe(bronzeResult.winnerId);
+    expect(standings.find((standing) => standing.place === 4)?.teamId).toBe(bronzeResult.loserId);
+    expect(isThirdPlaceMatch(initialMatches[0])).toBe(false);
+    expect(isThirdPlaceMatch(bronzeResult)).toBe(true);
+  });
+
+  it('corrects an old GSL Classic final that was saved with the semifinal label', () => {
+    expect(normalizeTrophyMatchStageName({
+      id: 'tour_123_playoff_final',
+      poolKey: 'final',
+      stageName: '1/2 финала (Полуфинал)'
+    })).toBe('Гранд-Финал (Матч за чемпионство)');
+  });
+});
+

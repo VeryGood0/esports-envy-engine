@@ -15,6 +15,95 @@ import {
 } from '../types';
 import { calculatePointsStakes, calculateMatchFormDeltas } from './probability';
 
+/**
+ * Whether this tournament uses two GSL groups with eight teams each.
+ * These events always require the playoff bronze match: the semifinal losers
+ * must be seeded into it, and the tournament must not be considered complete
+ * before it is played.
+ */
+export function isEightTeamGslTournament(tournament?: Partial<TournamentState> | null): boolean {
+  if (!tournament || (tournament.mode !== 'gsl_groups' && tournament.mode !== 'groups_playoffs')) return false;
+
+  const style = tournament.groupStyle
+    || tournament.stageFormats?.groupStyle
+    || tournament.groups?.find((group) => group.groupStyle)?.groupStyle
+    || (tournament.mode === 'gsl_groups' ? 'gsl' : undefined);
+  const groupCount = tournament.groupCount
+    || tournament.stageFormats?.groupCount
+    || tournament.groups?.length
+    || 0;
+  const teamCount = tournament.teamCount
+    || tournament.participatingTeamIds?.length
+    || tournament.groups?.reduce((total, group) => total + (group.teamIds?.length || 0), 0)
+    || 0;
+  const hasEightTeamGroups = (tournament.groups || []).some((group) => (group.teamIds?.length || 0) >= 8)
+    || (groupCount === 2 && teamCount >= 16);
+
+  return groupCount === 2
+    && teamCount >= 16
+    && hasEightTeamGroups
+    && (style === 'gsl_double_elim_8' || style === 'gsl');
+}
+
+export function isThirdPlaceMatch(match: Pick<TournamentMatch, 'id' | 'poolKey' | 'name'>): boolean {
+  const id = (match.id || '').toLowerCase();
+  const poolKey = (match.poolKey || '').toLowerCase();
+  const name = (match.name || '').toLowerCase();
+  // Do not use a broad `3-е место` substring: quarterfinal names include
+  // the seed label `3-е место группы A/B`, which must never be treated as bronze.
+  return poolKey === 'third_place'
+    || poolKey === 'third'
+    || id === 'playoff_3rd'
+    || id.endsWith('_third_place')
+    || name.includes('матч за 3-е место')
+    || name.includes('матч за третье место')
+    || name.includes('match for 3rd place')
+    || name.includes('third-place match')
+    || name.includes('бронз');
+}
+
+/**
+ * Repairs legacy trophy labels using the canonical match id/pool key first.
+ * This also fixes already-saved trophies whose Grand Final was stored as a
+ * semifinal label by an older version of the app.
+ */
+export function normalizeTrophyMatchStageName(
+  match: Pick<TrophyMatchSummary, 'id' | 'poolKey' | 'stageName'>
+): string {
+  const id = (match.id || '').toLowerCase();
+  const poolKey = (match.poolKey || '').toLowerCase();
+  const savedName = (match.stageName || '').toLowerCase();
+  const isUpperOrLowerBracketFinal = id.includes('_ub_final') || id.includes('_lb_final')
+    || poolKey === 'ub_final' || poolKey === 'lb_final';
+
+  if (!isUpperOrLowerBracketFinal && (
+    poolKey === 'final'
+    || poolKey === 'playoff_final'
+    || poolKey === 'grand_final'
+    || /(?:^|_)(?:playoff_)?final$/.test(id)
+    || savedName.includes('гранд-финал')
+    || savedName.includes('гранд финал')
+  )) {
+    return 'Гранд-Финал (Матч за чемпионство)';
+  }
+
+  if (poolKey === 'third_place' || poolKey === 'third' || id === 'playoff_3rd'
+    || id.endsWith('_third_place') || savedName.includes('матч за 3-е место')
+    || savedName.includes('бронз')) {
+    return 'Матч за 3-е место (Бронзовый финал)';
+  }
+
+  if (poolKey.startsWith('qf') || poolKey.includes('_qf') || savedName.includes('четвертьфинал') || savedName.includes('1/4 финала')) {
+    return '1/4 финала (Четвертьфинал)';
+  }
+
+  if (poolKey.startsWith('sf') || poolKey.includes('_sf') || savedName.includes('полуфинал') || savedName.includes('1/2 финала')) {
+    return '1/2 финала (Полуфинал)';
+  }
+
+  return match.stageName || 'Турнирный матч';
+}
+
 export interface DestinationInfo {
   label: string;
   type: 'qualified' | 'eliminated' | 'pool';
@@ -894,16 +983,8 @@ export function updatePlayoffMatchResult(
   }
 
   // Propagate to 3rd Place Match if enabled
-  const thirdMatch = matches.find(
-    (m) =>
-      m.id === 'playoff_3rd' ||
-      m.poolKey === 'third_place' ||
-      m.poolKey === 'third' ||
-      m.id.endsWith('_third_place') ||
-      m.name.toLowerCase().includes('3-е') ||
-      m.name.toLowerCase().includes('3rd')
-  );
-  if (includeThirdPlace && thirdMatch) {
+  const thirdMatch = matches.find((m) => isThirdPlaceMatch(m));
+  if (thirdMatch) {
     if (sf1?.loserId) thirdMatch.teamAId = sf1.loserId;
     if (sf2?.loserId) thirdMatch.teamBId = sf2.loserId;
     if (thirdMatch.teamAId && thirdMatch.teamBId && thirdMatch.status !== 'finished') {
@@ -911,10 +992,10 @@ export function updatePlayoffMatchResult(
     }
   }
 
-  // When a third-place match is enabled, keep the tournament active until it is played too.
-  // Some formats (e.g. double elimination) have no separate bronze match; when a
-  // third-place match is generated, require it to finish before ending the event.
-  const thirdPlaceFinished = !includeThirdPlace || !thirdMatch || (thirdMatch.status === 'finished' && !!thirdMatch.winnerId);
+  // If a third-place match exists in the bracket, it is part of the tournament
+  // and must be played before completion, even when an old saved tournament has
+  // a stale includeThirdPlace=false flag.
+  const thirdPlaceFinished = !thirdMatch || (thirdMatch.status === 'finished' && !!thirdMatch.winnerId);
   const isTournamentOver = !!(final?.status === 'finished' && final.winnerId && thirdPlaceFinished);
 
   return { updatedMatches: matches, isTournamentOver };
@@ -980,15 +1061,7 @@ export function computeFinalTournamentStandings(
     calculateTournamentVrsBounties(tier, allTeams, teamCount);
 
   const finalMatch = playoffMatches.find((m) => isGrandFinalMatch(m));
-  const thirdMatch = playoffMatches.find(
-    (m) =>
-      m.id === 'playoff_3rd' ||
-      m.poolKey === 'third_place' ||
-      m.poolKey === 'third' ||
-      m.id.endsWith('_third_place') ||
-      m.name.toLowerCase().includes('3-е') ||
-      m.name.toLowerCase().includes('3rd')
-  );
+  const thirdMatch = playoffMatches.find((m) => isThirdPlaceMatch(m));
   const sf1 = playoffMatches.find((m) => m.id === 'playoff_sf1' || m.poolKey === 'sf1');
   const sf2 = playoffMatches.find((m) => m.id === 'playoff_sf2' || m.poolKey === 'sf2');
   const qfMatches = playoffMatches.filter((m) => m.id.startsWith('playoff_qf') || m.poolKey.startsWith('qf'));
@@ -1019,7 +1092,7 @@ export function computeFinalTournamentStandings(
   }
 
   // 3rd & 4th Place
-  if (includeThirdPlace && thirdMatch?.winnerId && thirdMatch?.loserId) {
+  if (thirdMatch?.status === 'finished' && thirdMatch?.winnerId && thirdMatch?.loserId) {
     standings.push({
       place: 3,
       placeLabel: '3-е место · Бронзовый призёр',
@@ -1153,7 +1226,7 @@ export function getTournamentMatchChronologicalRank(m: {
   if (isGrand) return 1000;
 
   // 2. 3rd place decider (Rank 950)
-  if (pk.includes('3rd') || pk.includes('third') || nm.includes('3-е') || nm.includes('бронз')) {
+  if (pk.includes('3rd') || pk.includes('third') || nm.includes('матч за 3-е место') || nm.includes('бронз')) {
     return 950;
   }
 
@@ -1228,25 +1301,13 @@ export function extractTeamTournamentMatches(
       const pk = match.poolKey?.toLowerCase() || '';
       const nm = match.name?.toLowerCase() || '';
 
-      // Check quarter and semi FIRST so they don't match general "финал"
-      if (pk.startsWith('qf') || pk.includes('qf') || nm.includes('четвертьфинал') || nm.includes('1/4')) {
-        return '1/4 финала (Четвертьфинал)';
-      }
-      if (pk.startsWith('sf') || pk.includes('sf') || nm.includes('полуфинал') || nm.includes('1/2')) {
-        return '1/2 финала (Полуфинал)';
-      }
-      if (pk.includes('3rd') || pk.includes('third') || nm.includes('3-е') || nm.includes('бронз')) {
-        return 'Матч за 3-е место (Бронзовый финал)';
-      }
-      if (
-        pk === 'playoff_final' ||
-        pk === 'final' ||
-        pk === 'grand_final' ||
-        nm.includes('гранд') ||
-        nm === 'финал'
-      ) {
-        return 'Гранд-Финал (Матч за чемпионство)';
-      }
+      // Canonical poolKey/id wins over a stale or misleading saved/display name.
+      const canonicalStage = normalizeTrophyMatchStageName({
+        id: match.id,
+        poolKey: match.poolKey,
+        stageName: match.name || ''
+      });
+      if (canonicalStage !== (match.name || '')) return canonicalStage;
       if (pk.includes('upper') || nm.includes('верхняя')) {
         return `Верхняя сетка · ${match.name}`;
       }
@@ -1358,6 +1419,13 @@ export function createCustomTournament(params: CreateTournamentParams): Tourname
   } = params;
 
   const teamCount = seededTeams.length;
+  const requestedGroupStyle = stageFormats.groupStyle || (mode === 'gsl_groups' ? 'gsl' : undefined);
+  const groupCountForFormat = stageFormats.groupCount || 2;
+  const mandatoryGslEightTeamThirdPlace = (mode === 'gsl_groups' || mode === 'groups_playoffs')
+    && teamCount >= 16
+    && groupCountForFormat === 2
+    && (requestedGroupStyle === 'gsl_double_elim_8' || requestedGroupStyle === 'gsl');
+  const effectiveIncludeThirdPlace = includeThirdPlace || mandatoryGslEightTeamThirdPlace;
   const teamSeeds: Record<string, number> = {};
   seededTeams.forEach((t, idx) => {
     teamSeeds[t.id] = idx + 1;
@@ -1378,7 +1446,7 @@ export function createCustomTournament(params: CreateTournamentParams): Tourname
     participatingTeamIds: seededTeams.map((t) => t.id),
     teamSeeds,
     stageFormats,
-    includeThirdPlace,
+    includeThirdPlace: effectiveIncludeThirdPlace,
     currentStage: mode === 'playoffs_only' || mode === 'single_elimination' || mode === 'double_elimination'
       ? 'playoffs'
       : mode === 'round_robin'
@@ -1824,6 +1892,10 @@ export function createCustomTournament(params: CreateTournamentParams): Tourname
     const configuredGroupStyle = stageFormats.groupStyle || (mode === 'gsl_groups' ? 'gsl' : 'round_robin');
     const isTop3Gsl = configuredGroupStyle === 'gsl_top3';
     const isGsl = mode === 'gsl_groups' || configuredGroupStyle === 'gsl' || configuredGroupStyle === 'gsl_classic_4' || configuredGroupStyle === 'gsl_double_elim_8' || isTop3Gsl;
+    const includeGroupThirdPlace = includeThirdPlace || (
+      groupCount === 2 && teamCount >= 16 &&
+      (configuredGroupStyle === 'gsl_double_elim_8' || configuredGroupStyle === 'gsl')
+    );
 
     const groups: TournamentGroup[] = [];
     const allGroupMatches: TournamentMatch[] = [];
@@ -1946,7 +2018,7 @@ export function createCustomTournament(params: CreateTournamentParams): Tourname
         { id: 'playoff_sf2', stage: 'playoffs', poolKey: 'sf2', roundNumber: 2, name: 'Полуфинал 2 (1-е место B vs победитель QF2)', scoreA: 0, scoreB: 0, format: sfFmt, status: 'scheduled', directSeedA: true },
         { id: 'playoff_final', stage: 'playoffs', poolKey: 'final', roundNumber: 3, name: 'Гранд-финал', scoreA: 0, scoreB: 0, format: finalFmt, status: 'scheduled' }
       ];
-      if (includeThirdPlace) {
+      if (includeGroupThirdPlace) {
         playoffMatches.push({
           id: 'playoff_3rd', stage: 'playoffs', poolKey: 'third_place', roundNumber: 3,
           name: 'Матч за 3-е место (Бронзовый финал)', scoreA: 0, scoreB: 0,
@@ -1962,7 +2034,7 @@ export function createCustomTournament(params: CreateTournamentParams): Tourname
         { id: 'playoff_sf2', stage: 'playoffs', poolKey: 'sf2', roundNumber: 2, name: 'Полуфинал 2 (1-е место A vs победитель QF2)', scoreA: 0, scoreB: 0, format: sfFmt, status: 'scheduled', directSeedA: true },
         { id: 'playoff_final', stage: 'playoffs', poolKey: 'final', roundNumber: 3, name: 'Гранд-финал', scoreA: 0, scoreB: 0, format: finalFmt, status: 'scheduled' }
       ];
-      if (includeThirdPlace) {
+      if (includeGroupThirdPlace) {
         playoffMatches.push({
           id: 'playoff_3rd', stage: 'playoffs', poolKey: 'third_place', roundNumber: 3,
           name: 'Матч за 3-е место (Бронзовый финал)', scoreA: 0, scoreB: 0,

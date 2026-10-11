@@ -279,6 +279,8 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
   const teamsPerGroup = selectedTeamIds.length / groupCount;
   const groupSizeLabel = Number.isInteger(teamsPerGroup) ? `по ${teamsPerGroup} команд` : 'неравное число команд';
   const fixedGslTeamCount = groupStyle === 'gsl_classic_4' ? 8 : groupStyle === 'gsl_double_elim_8' ? 16 : null;
+  const thirdPlaceRequired = usesGslGroups && groupCount === 2 && teamsPerGroup === 8 && teamCount === 16
+    && (groupStyle === 'gsl_double_elim_8' || groupStyle === 'gsl');
   const groupTeamCountOptions = !isGroupTournament
     ? [4, 6, 8, 12, 16, 24, 32]
     : groupStyle === 'gsl_classic_4'
@@ -1353,22 +1355,28 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
                   <div className="text-xs">
                     <span className="font-bold text-white block">Матч за 3-е место (Бронзовый финал)</span>
                     <span className="text-slate-400 text-[11px]">
-                      Проводить матч между проигравшими в полуфинале
+                      {thirdPlaceRequired
+                        ? 'Обязателен для формата с 8 командами в каждой группе: победитель получает 3-е место.'
+                        : 'Проводить матч между проигравшими в полуфинале'}
                     </span>
                   </div>
 
                   <button
+                    disabled={thirdPlaceRequired}
                     onClick={() => {
+                      if (thirdPlaceRequired) return;
                       soundFx.playClick();
                       setIncludeThirdPlace((p) => !p);
                     }}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-mono font-bold transition-colors cursor-pointer ${
-                      includeThirdPlace
+                    className={`px-3 py-1.5 rounded-xl text-xs font-mono font-bold transition-colors ${
+                      thirdPlaceRequired ? 'cursor-not-allowed opacity-90' : 'cursor-pointer'
+                    } ${
+                      (includeThirdPlace || thirdPlaceRequired)
                         ? 'bg-emerald-500 text-black'
                         : 'bg-slate-800 text-slate-400 hover:text-white'
                     }`}
                   >
-                    {includeThirdPlace ? 'Включен' : 'Отключен'}
+                    {(includeThirdPlace || thirdPlaceRequired) ? 'Включен' : 'Отключен'}
                   </button>
                 </div>
               </div>

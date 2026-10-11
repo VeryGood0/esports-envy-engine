@@ -23,6 +23,7 @@ interface PlayoffsStageViewProps {
   onToggleLinkSwiss?: () => void;
   qualifiedRecords?: SwissTeamRecord[];
   includeThirdPlace: boolean;
+  thirdPlaceRequired?: boolean;
   onToggleThirdPlace: () => void;
   onOpenMatch: (match: TournamentMatch) => void;
   onQuickSimulateMatch?: (match: TournamentMatch) => void;
@@ -41,6 +42,7 @@ export const PlayoffsStageView: React.FC<PlayoffsStageViewProps> = ({
   onToggleLinkSwiss,
   qualifiedRecords = [],
   includeThirdPlace,
+  thirdPlaceRequired = false,
   onToggleThirdPlace,
   onOpenMatch,
   onQuickSimulateMatch,
@@ -450,16 +452,21 @@ export const PlayoffsStageView: React.FC<PlayoffsStageViewProps> = ({
           </div>
 
           {/* Toggle 3rd place match */}
-          <label className="flex items-center gap-2 cursor-pointer select-none text-xs font-mono">
-            <span className="text-slate-400">Включить матч за 3-е место:</span>
+          <label className={`flex items-center gap-2 select-none text-xs font-mono ${thirdPlaceRequired ? 'cursor-not-allowed' : 'cursor-pointer'}`}>
+            <span className="text-slate-400">
+              {thirdPlaceRequired ? 'Матч обязателен для GSL 8×8:' : 'Включить матч за 3-е место:'}
+            </span>
             <div
+              aria-disabled={thirdPlaceRequired}
+              title={thirdPlaceRequired ? 'В этом формате матч за 3-е место обязателен' : 'Включить или отключить матч за 3-е место'}
               onClick={() => {
+                if (thirdPlaceRequired) return;
                 soundFx.playClick();
                 onToggleThirdPlace();
               }}
               className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${
                 includeThirdPlace ? 'bg-amber-500' : 'bg-slate-700'
-              }`}
+              } ${thirdPlaceRequired ? 'opacity-80' : ''}`}
             >
               <span
                 className={`inline-block h-3.5 w-3.5 transform rounded-full bg-black transition-transform ${

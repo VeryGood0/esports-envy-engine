@@ -168,9 +168,23 @@ export default function App() {
   }, [archivedTournaments]);
 
   useEffect(() => {
-    if (!tournament || tournament.currentStage !== 'completed') return;
-    setArchivedTournaments((prev) => prev.some((item) => item.id === tournament.id) ? prev : [tournament, ...prev]);
-  }, [tournament?.id, tournament?.currentStage]);
+    if (!tournament) return;
+    setArchivedTournaments((prev) => {
+      if (tournament.currentStage !== 'completed') {
+        // A legacy 8-team GSL can be reopened so its required bronze match is
+        // played. Remove any stale archived copy until the tournament truly ends.
+        const activeOnly = prev.filter((item) => item.id !== tournament.id);
+        return activeOnly.length === prev.length ? prev : activeOnly;
+      }
+
+      // Keep the archived snapshot in sync with final standings and match results,
+      // rather than leaving an older copy from before a recovery/fix.
+      const alreadyArchived = prev.some((item) => item.id === tournament.id);
+      return alreadyArchived
+        ? prev.map((item) => item.id === tournament.id ? tournament : item)
+        : [tournament, ...prev];
+    });
+  }, [tournament]);
 
   // 2. Active Match Teams
   const [teamAId, setTeamAId] = useState<string>('vitality'); // Vitality
