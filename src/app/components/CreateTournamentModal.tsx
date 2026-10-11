@@ -274,6 +274,33 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
     return defaultSortedTeams.slice(0, 16).map((t) => t.id);
   });
 
+  const isGroupTournament = mode === 'gsl_groups' || mode === 'groups_playoffs';
+  const usesGslGroups = mode === 'gsl_groups' || (mode === 'groups_playoffs' && groupStyle === 'gsl');
+  const teamsPerGroup = selectedTeamIds.length / groupCount;
+  const groupSizeLabel = Number.isInteger(teamsPerGroup) ? `по ${teamsPerGroup} команд` : 'неравное число команд';
+  const isGroupLayoutValid = !isGroupTournament || (
+    selectedTeamIds.length >= groupCount * 2 &&
+    selectedTeamIds.length % groupCount === 0 &&
+    (!usesGslGroups || [4, 8].includes(teamsPerGroup))
+  );
+
+  // Resolve the visible group for every selected team and freeze it before reseeding.
+  // This keeps manually assigned groups balanced when the seed order changes.
+  const getEffectiveGroupAssignments = (
+    teamIds: string[],
+    assignments: Record<string, string>,
+    numberOfGroups: number
+  ): Record<string, string> => {
+    const letters = 'ABCDEFGH'.slice(0, numberOfGroups).split('');
+    return Object.fromEntries(teamIds.map((teamId, index) => {
+      const current = assignments[teamId];
+      if (current && letters.includes(current)) return [teamId, current];
+      const round = Math.floor(index / numberOfGroups);
+      const position = round % 2 === 0 ? index % numberOfGroups : numberOfGroups - 1 - (index % numberOfGroups);
+      return [teamId, letters[position] || 'A'];
+    }));
+  };
+
   // Filters for Team Picker
   const [searchTeam, setSearchTeam] = useState('');
   const [selectedRegion, setSelectedRegion] = useState<string>('all');
@@ -290,6 +317,7 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
     setMode(preset.mode);
     setTeamCount(preset.teamCount);
     setStageFormats(preset.stageFormats);
+    setGroupAssignments({});
 
     // Pick top teams for this preset
     const needed = preset.teamCount;
@@ -304,6 +332,7 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
   // Adjust team count
   const handleSetTeamCount = (count: number) => {
     soundFx.playClick();
+    setGroupAssignments({});
     setTeamCount(count);
     if (selectedTeamIds.length > count) {
       setSelectedTeamIds(selectedTeamIds.slice(0, count));
@@ -318,6 +347,7 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
   // Toggle Team Selection
   const handleToggleTeam = (teamId: string) => {
     soundFx.playClick();
+    setGroupAssignments({});
     if (selectedTeamIds.includes(teamId)) {
       setSelectedTeamIds(selectedTeamIds.filter((id) => id !== teamId));
     } else {
@@ -338,6 +368,7 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
       const scoreB = b.points * 0.7 + formB * 10;
       return scoreB - scoreA;
     });
+    setGroupAssignments(getEffectiveGroupAssignments(selectedTeamIds, groupAssignments, groupCount));
     setSelectedTeamIds(sorted.map((t) => t.id));
   };
 
@@ -345,6 +376,7 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
   const handleRandomSeed = () => {
     soundFx.playClick();
     const shuffled = [...selectedTeamIds].sort(() => Math.random() - 0.5);
+    setGroupAssignments(getEffectiveGroupAssignments(selectedTeamIds, groupAssignments, groupCount));
     setSelectedTeamIds(shuffled);
   };
 
@@ -357,12 +389,13 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
     const temp = copy[index];
     copy[index] = copy[targetIdx];
     copy[targetIdx] = temp;
+    setGroupAssignments(getEffectiveGroupAssignments(selectedTeamIds, groupAssignments, groupCount));
     setSelectedTeamIds(copy);
   };
 
   // Finish and Create Tournament
   const handleCreate = () => {
-    if (selectedTeamIds.length < 2) return;
+    if (selectedTeamIds.length < 2 || !isGroupLayoutValid) return;
     soundFx.playVictory();
 
     const selectedTeamsInSeedOrder = selectedTeamIds
@@ -746,7 +779,7 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
                       Настройки группового формата (Сетки как на фото)
                     </h4>
                     <span className="text-[11px] font-mono text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/30">
-                      По 2 команды из группы → Плей-офф
+                      {`${groupCount} группы · ${groupSizeLabel} · ${usesGslGroups && teamsPerGroup === 8 ? 3 : 2} в плей-офф из каждой`}
                     </span>
                   </div>
 
@@ -767,6 +800,7 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
                             onClick={() => {
                               soundFx.playClick();
                               setGroupCount(gOpt.cnt);
+                              setGroupAssignments({});
                               handleSetTeamCount(gOpt.cnt === 2 ? 16 : gOpt.cnt * 4);
                             }}
                             className={`p-2.5 rounded-xl border text-xs font-bold transition-all cursor-pointer text-left ${
@@ -852,6 +886,13 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
                     <span className="text-xs font-mono text-slate-400 mt-0.5 block">
                       Выбрано: <span className="text-amber-400 font-bold">{selectedTeamIds.length}</span> из {teamCount} команд
                     </span>
+                    {!isGroupLayoutValid && (
+                      <span className="text-[10px] font-mono text-rose-300 mt-1 block">
+                        {usesGslGroups
+                          ? 'Для GSL выбери равные группы по 4 или 8 команд (всего 8 или 16 участников).'
+                          : `Количество участников должно делиться на ${groupCount} группы, минимум по 2 команды.`}
+                      </span>
+                    )}
                   </div>
 
                   <div className="flex items-center gap-1.5 bg-[#090d14] p-1 rounded-xl border border-slate-800">
@@ -944,7 +985,18 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
                               const pos = round % 2 === 0 ? idx % groupCount : groupCount - 1 - (idx % groupCount);
                               return groupLetters[pos] || 'A';
                             })()}
-                            onChange={(e) => setGroupAssignments((prev) => ({ ...prev, [id]: e.target.value }))}
+                            onChange={(e) => {
+                              const targetGroup = e.target.value;
+                              setGroupAssignments((prev) => {
+                                const effective = getEffectiveGroupAssignments(selectedTeamIds, prev, groupCount);
+                                const sourceGroup = effective[id];
+                                if (!sourceGroup || sourceGroup === targetGroup) return prev;
+                                // Swap with one team already in the target group so every group stays even.
+                                const swapTeamId = selectedTeamIds.find((candidateId) => candidateId !== id && effective[candidateId] === targetGroup);
+                                if (!swapTeamId) return prev;
+                                return { ...effective, [id]: targetGroup, [swapTeamId]: sourceGroup };
+                              });
+                            }}
                             className="max-w-[76px] rounded-lg border border-amber-500/30 bg-slate-950 px-1.5 py-1 text-[10px] text-amber-300"
                             title="Назначить команду в группу"
                           >
@@ -1242,7 +1294,7 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
             ) : (
               <button
                 onClick={handleCreate}
-                disabled={selectedTeamIds.length < 2}
+                disabled={selectedTeamIds.length < 2 || !isGroupLayoutValid}
                 className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-black text-xs font-black uppercase tracking-wider transition-all shadow-lg shadow-emerald-500/25 active:scale-95 cursor-pointer disabled:opacity-50"
               >
                 <div className="flex items-center gap-2">

@@ -72,16 +72,28 @@ export const TournamentHub: React.FC<TournamentHubProps> = ({
   history = [],
   onOpenDataManagement
 }) => {
-  const [activeStageTab, setActiveStageTab] = useState<'swiss' | 'playoffs' | 'groups'>(() => {
-    if (tournament?.mode === 'gsl_groups' || tournament?.mode === 'groups_playoffs') {
-      return tournament.currentStage === 'playoffs' ? 'playoffs' : 'groups';
+  type StageTab = 'swiss' | 'playoffs' | 'groups';
+  const getInitialStageTab = (tour?: TournamentState | null): StageTab => {
+    if (tour?.mode === 'gsl_groups' || tour?.mode === 'groups_playoffs') {
+      return tour.currentStage === 'playoffs' || tour.currentStage === 'completed' ? 'playoffs' : 'groups';
     }
-    return tournament?.mode === 'playoffs_only' ||
-      tournament?.currentStage === 'playoffs' ||
-      tournament?.currentStage === 'completed'
+    return tour?.mode === 'playoffs_only' || tour?.mode === 'single_elimination' || tour?.mode === 'double_elimination' ||
+      tour?.currentStage === 'playoffs' || tour?.currentStage === 'completed'
       ? 'playoffs'
       : 'swiss';
-  });
+  };
+  const [stageTabSelection, setStageTabSelection] = useState<{ tournamentId?: string; tab: StageTab }>(() => ({
+    tournamentId: tournament?.id,
+    tab: getInitialStageTab(tournament)
+  }));
+  // Resolve the correct tab synchronously when the tournament ID changes, so a newly
+  // created groups tournament never briefly renders the playoff bracket first.
+  const activeStageTab = stageTabSelection.tournamentId === tournament?.id
+    ? stageTabSelection.tab
+    : getInitialStageTab(tournament);
+  const setActiveStageTab = (tab: StageTab) => {
+    setStageTabSelection({ tournamentId: tournament?.id, tab });
+  };
 
   const [activeMatchToSimulate, setActiveMatchToSimulate] = useState<TournamentMatch | null>(null);
   const [isResultsOpen, setIsResultsOpen] = useState(false);

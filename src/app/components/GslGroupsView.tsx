@@ -37,6 +37,7 @@ export const GslGroupsView: React.FC<GslGroupsViewProps> = ({
   onUpdateGroupMatches
 }) => {
   const [editingGroup, setEditingGroup] = useState<TournamentGroup | null>(null);
+  const [selectedGroupLetter, setSelectedGroupLetter] = useState('A');
   const getTeam = (id?: string) => teams.find((t) => t.id === id);
 
   // Check if all groups have determined their 2 playoff qualifiers
@@ -210,9 +211,35 @@ export const GslGroupsView: React.FC<GslGroupsViewProps> = ({
         )}
       </div>
 
-      {/* Grid of Groups: Matches User Screenshot Structure */}
-      <div className={`grid grid-cols-1 ${groups.length >= 2 ? 'lg:grid-cols-2' : ''} gap-6`}>
-        {groups.map((group) => {
+      {/* Switch between groups so each bracket has enough horizontal room. */}
+      {groups.length > 1 && (
+        <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-slate-800 bg-[#0b0f19] p-2" role="tablist" aria-label="Выбор группы">
+          {groups.map((group) => {
+            const letter = group.letter || group.name.replace('Группа ', '').trim();
+            const isSelected = letter === (groups.some((g) => (g.letter || g.name.replace('Группа ', '').trim()) === selectedGroupLetter) ? selectedGroupLetter : (groups[0]?.letter || 'A'));
+            return (
+              <button
+                key={group.id}
+                type="button"
+                role="tab"
+                aria-selected={isSelected}
+                onClick={() => { soundFx.playClick(); setSelectedGroupLetter(letter); }}
+                className={`rounded-xl px-4 py-2 text-xs font-mono font-extrabold transition-colors cursor-pointer ${isSelected ? 'bg-amber-500 text-black shadow-md shadow-amber-500/10' : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'}`}
+              >
+                Группа {letter}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* A single horizontally progressing bracket is shown at a time. */}
+      <div className="grid grid-cols-1 gap-6">
+        {groups.filter((group) => {
+          const letter = group.letter || group.name.replace('Группа ', '').trim();
+          const activeLetter = groups.some((g) => (g.letter || g.name.replace('Группа ', '').trim()) === selectedGroupLetter) ? selectedGroupLetter : (groups[0]?.letter || 'A');
+          return groups.length <= 1 || letter === activeLetter;
+        }).map((group) => {
           const gLetter = group.letter || group.name.replace('Группа ', '').trim();
           const m1 = group.matches.find((m) => m.poolKey === `gsl_${gLetter}_opening1`);
           const m2 = group.matches.find((m) => m.poolKey === `gsl_${gLetter}_opening2`);
@@ -222,6 +249,13 @@ export const GslGroupsView: React.FC<GslGroupsViewProps> = ({
 
           const q1 = getTeam(group.qualifiedTeamIds?.[0]);
           const q2 = getTeam(group.qualifiedTeamIds?.[1]);
+          const getGslMatch = (key: string) => group.matches.find((m) => m.poolKey === `gsl_${gLetter}_${key}`);
+          const upperOpening = [1, 2, 3, 4].map((n) => getGslMatch(`u1_${n}`)).filter(Boolean) as TournamentMatch[];
+          const upperSemis = [getGslMatch('u2_1'), getGslMatch('u2_2')].filter(Boolean) as TournamentMatch[];
+          const lowerRound1 = [getGslMatch('l1_1'), getGslMatch('l1_2')].filter(Boolean) as TournamentMatch[];
+          const lowerSemis = [getGslMatch('l2_1'), getGslMatch('l2_2')].filter(Boolean) as TournamentMatch[];
+          const upperFinal = getGslMatch('uf');
+          const lowerFinal = getGslMatch('ls');
 
           return (
             <div
@@ -240,7 +274,7 @@ export const GslGroupsView: React.FC<GslGroupsViewProps> = ({
                 </div>
 
                 <div className="flex items-center gap-2">
-                  {onUpdateGroupMatches && m1?.status !== 'finished' && m2?.status !== 'finished' && (
+                  {group.teamIds.length < 8 && onUpdateGroupMatches && m1?.status !== 'finished' && m2?.status !== 'finished' && (
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
@@ -268,22 +302,85 @@ export const GslGroupsView: React.FC<GslGroupsViewProps> = ({
               </div>
 
               {group.teamIds.length >= 8 && (
-                <div className="space-y-5">
-                  {[1, 2, 3, 4, 5].map((round) => {
-                    const roundMatches = group.matches.filter((m) => m.roundNumber === round);
-                    if (!roundMatches.length) return null;
-                    const title = round === 1 ? 'Upper bracket · Opening round' : round === 2 ? 'Upper semi-finals / Lower round 1' : round === 3 ? 'Upper final / Lower round 2' : round === 4 ? 'Lower semi-final' : 'Lower final';
-                    return <div key={round} className="space-y-2">
-                      <h5 className="text-[11px] uppercase tracking-wider text-slate-400 font-bold">{title}</h5>
-                      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
-                        {roundMatches.map((match) => renderGslMatchCard(match, match.name.replace(`${group.name} · `, ''), match.poolKey.endsWith('_uf') || match.poolKey.endsWith('_lf')))}
+                <div className="space-y-6">
+                  <div className="rounded-2xl border border-slate-800 bg-[#080c14] p-4 sm:p-5">
+                    <div className="overflow-x-auto pb-2">
+                      <div className="min-w-[900px]">
+                        <div className="mb-4 grid grid-cols-3 gap-8 text-[11px] font-mono font-bold uppercase tracking-wider text-slate-400">
+                          <div>Opening round</div><div>Upper semi-finals</div><div>Upper final</div>
+                        </div>
+                        <div className="relative">
+                        <svg className="pointer-events-none absolute inset-0 z-0 h-full w-full text-slate-600/70" viewBox="0 0 1000 622" preserveAspectRatio="none" aria-hidden="true">
+                          <g fill="none" stroke="currentColor" strokeWidth="1.5">
+                            <path d="M310 74 H335 V153 H345 M310 230 H335 V153 M310 386 H335 V464 H345 M310 542 H335 V464" />
+                            <path d="M655 153 H675 V308 H690 M655 464 H675 V308" />
+                          </g>
+                        </svg>
+                        <div className="relative z-10 grid grid-cols-[repeat(3,minmax(250px,1fr))] grid-rows-[repeat(4,148px)] gap-x-8 gap-y-2">
+                          {upperOpening.map((match, index) => (
+                            <div key={match.id} className="flex min-w-0 items-center" style={{ gridColumn: 1, gridRow: index + 1 }}>
+                              {renderGslMatchCard(match, `Opening round · Match ${index + 1}`)}
+                            </div>
+                          ))}
+                          {upperSemis.map((match, index) => (
+                            <div key={match.id} className="flex min-w-0 items-center" style={{ gridColumn: 2, gridRow: `${index * 2 + 1} / span 2` }}>
+                              {renderGslMatchCard(match, `Upper semi-final ${index + 1}`)}
+                            </div>
+                          ))}
+                          {upperFinal && (
+                            <div className="flex min-w-0 items-center" style={{ gridColumn: 3, gridRow: '2 / span 2' }}>
+                              {renderGslMatchCard(upperFinal, 'Upper final · 1st / 2nd place', true)}
+                            </div>
+                          )}
+                        </div>
+                        </div>
                       </div>
-                    </div>;
-                  })}
-                  {(q1 || q2 || group.qualifiedTeamIds?.[2]) && <div className="p-3 rounded-xl bg-emerald-950/20 border border-emerald-500/30 text-xs font-mono text-slate-300">
-                    <div className="font-bold text-emerald-300 mb-2">Квалификация в плей-офф</div>
-                    {[q1, q2, getTeam(group.qualifiedTeamIds?.[2])].map((team, i) => team && <div key={team.id} className="flex items-center gap-2 py-1"><TeamLogo team={team} size="xs"/><span>{i + 1}-е место: {team.shortName || team.name}</span></div>)}
-                  </div>}
+                    </div>
+                    <div className="mt-3 text-[11px] text-slate-500">Победитель Upper final занимает 1-е место, проигравший — 2-е место. Обе команды сразу проходят в плей-офф.</div>
+                  </div>
+
+                  <div className="rounded-2xl border border-slate-800 bg-[#080c14] p-4 sm:p-5">
+                    <div className="overflow-x-auto pb-2">
+                      <div className="min-w-[900px]">
+                        <div className="mb-4 grid grid-cols-3 gap-8 text-[11px] font-mono font-bold uppercase tracking-wider text-slate-400">
+                          <div>Lower round 1</div><div>Lower semi-finals</div><div>Lower final</div>
+                        </div>
+                        <div className="relative">
+                        <svg className="pointer-events-none absolute inset-0 z-0 h-full w-full text-slate-600/70" viewBox="0 0 1000 622" preserveAspectRatio="none" aria-hidden="true">
+                          <g fill="none" stroke="currentColor" strokeWidth="1.5">
+                            <path d="M310 153 H345 M310 464 H345" />
+                            <path d="M655 153 H675 V308 H690 M655 464 H675 V308" />
+                          </g>
+                        </svg>
+                        <div className="relative z-10 grid grid-cols-[repeat(3,minmax(250px,1fr))] grid-rows-[repeat(4,148px)] gap-x-8 gap-y-2">
+                          {lowerRound1.map((match, index) => (
+                            <div key={match.id} className="flex min-w-0 items-center" style={{ gridColumn: 1, gridRow: `${index * 2 + 1} / span 2` }}>
+                              {renderGslMatchCard(match, `Lower round 1 · Match ${index + 1}`)}
+                            </div>
+                          ))}
+                          {lowerSemis.map((match, index) => (
+                            <div key={match.id} className="flex min-w-0 items-center" style={{ gridColumn: 2, gridRow: `${index * 2 + 1} / span 2` }}>
+                              {renderGslMatchCard(match, `Lower semi-final ${index + 1}`)}
+                            </div>
+                          ))}
+                          {lowerFinal && (
+                            <div className="flex min-w-0 items-center" style={{ gridColumn: 3, gridRow: '2 / span 2' }}>
+                              {renderGslMatchCard(lowerFinal, 'Lower final · 3rd place', true)}
+                            </div>
+                          )}
+                        </div>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="mt-3 text-[11px] text-slate-500">Проигравший любой встречи нижней сетки выбывает. Победитель Lower final занимает 3-е место и получает последний слот в плей-офф.</div>
+                  </div>
+
+                  {(q1 || q2 || group.qualifiedTeamIds?.[2]) && (
+                    <div className="p-3 rounded-xl bg-emerald-950/20 border border-emerald-500/30 text-xs font-mono text-slate-300">
+                      <div className="font-bold text-emerald-300 mb-2">Квалификация в плей-офф</div>
+                      {[q1, q2, getTeam(group.qualifiedTeamIds?.[2])].map((team, i) => team && <div key={team.id} className="flex items-center gap-2 py-1"><TeamLogo team={team} size="xs"/><span>{i + 1}-е место: {team.shortName || team.name}</span></div>)}
+                    </div>
+                  )}
                 </div>
               )}
 

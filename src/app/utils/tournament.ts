@@ -1828,16 +1828,24 @@ export function createCustomTournament(params: CreateTournamentParams): Tourname
           const add = (key: string, title: string, round: number, a?: string, ar: 'winner'|'loser' = 'winner', b?: string, br: 'winner'|'loser' = 'winner', teamAId?: string, teamBId?: string) => {
             gMatches.push({ id: `${tourId}_gsl_${gLetter}_${key}`, stage: 'groups', poolKey: `gsl_${gLetter}_${key}`, roundNumber: round, groupLetter: gLetter, name: `${gName} · ${title}`, teamAId, teamBId, sourceA: a, sourceAResult: ar, sourceB: b, sourceBResult: br, scoreA: 0, scoreB: 0, format: fmt, status: teamAId && teamBId ? 'ready' : 'scheduled' });
           };
-          for (let i = 0; i < 4; i++) add(`u1_${i+1}`, `Upper bracket · Round 1 · Match ${i+1}`, 1, undefined, 'winner', undefined, 'winner', groupTeams[i*2]?.id, groupTeams[i*2+1]?.id);
+          // Seeded eight-team opening bracket: 1v8, 4v5, 2v7, 3v6.
+          add('u1_1', 'Opening round · Match 1', 1, undefined, 'winner', undefined, 'winner', groupTeams[0]?.id, groupTeams[7]?.id);
+          add('u1_2', 'Opening round · Match 2', 1, undefined, 'winner', undefined, 'winner', groupTeams[3]?.id, groupTeams[4]?.id);
+          add('u1_3', 'Opening round · Match 3', 1, undefined, 'winner', undefined, 'winner', groupTeams[1]?.id, groupTeams[6]?.id);
+          add('u1_4', 'Opening round · Match 4', 1, undefined, 'winner', undefined, 'winner', groupTeams[2]?.id, groupTeams[5]?.id);
           add('u2_1', 'Upper semi-final 1', 2, `gsl_${gLetter}_u1_1`, 'winner', `gsl_${gLetter}_u1_2`, 'winner');
           add('u2_2', 'Upper semi-final 2', 2, `gsl_${gLetter}_u1_3`, 'winner', `gsl_${gLetter}_u1_4`, 'winner');
-          add('uf', 'Upper final · 1st place', 3, `gsl_${gLetter}_u2_1`, 'winner', `gsl_${gLetter}_u2_2`, 'winner');
+          add('uf', 'Upper final · 1st / 2nd place', 3, `gsl_${gLetter}_u2_1`, 'winner', `gsl_${gLetter}_u2_2`, 'winner');
+
+          // Correct 8-team double-elimination flow:
+          // 4 opening-round losers -> 2 lower round-1 matches -> 2 lower semifinals -> 1 lower final.
+          // Upper-semifinal losers enter the lower semifinals. There is no extra match against the
+          // upper-final loser: that team is already 2nd place and qualifies directly for playoffs.
           add('l1_1', 'Lower round 1 · Match 1', 2, `gsl_${gLetter}_u1_1`, 'loser', `gsl_${gLetter}_u1_2`, 'loser');
           add('l1_2', 'Lower round 1 · Match 2', 2, `gsl_${gLetter}_u1_3`, 'loser', `gsl_${gLetter}_u1_4`, 'loser');
-          add('l2_1', 'Lower round 2 · Match 1', 3, `gsl_${gLetter}_l1_1`, 'winner', `gsl_${gLetter}_u2_1`, 'loser');
-          add('l2_2', 'Lower round 2 · Match 2', 3, `gsl_${gLetter}_l1_2`, 'winner', `gsl_${gLetter}_u2_2`, 'loser');
-          add('ls', 'Lower semi-final', 4, `gsl_${gLetter}_l2_1`, 'winner', `gsl_${gLetter}_l2_2`, 'winner');
-          add('lf', 'Lower final · 3rd place', 5, `gsl_${gLetter}_ls`, 'winner', `gsl_${gLetter}_uf`, 'loser');
+          add('l2_1', 'Lower semi-final 1', 3, `gsl_${gLetter}_l1_1`, 'winner', `gsl_${gLetter}_u2_1`, 'loser');
+          add('l2_2', 'Lower semi-final 2', 3, `gsl_${gLetter}_l1_2`, 'winner', `gsl_${gLetter}_u2_2`, 'loser');
+          add('ls', 'Lower final · 3rd place', 4, `gsl_${gLetter}_l2_1`, 'winner', `gsl_${gLetter}_l2_2`, 'winner');
         } else {
           // Classic four-team GSL.
           const m1: TournamentMatch = { id: `${tourId}_gsl_${gLetter}_m1`, stage: 'groups', poolKey: `gsl_${gLetter}_opening1`, roundNumber: 1, groupLetter: gLetter, name: `${gName} · Открывающий матч 1`, teamAId: groupTeams[0]?.id, teamBId: groupTeams[3]?.id || groupTeams[groupTeams.length - 1]?.id, scoreA: 0, scoreB: 0, format: fmt, status: 'ready' };
@@ -1880,8 +1888,8 @@ export function createCustomTournament(params: CreateTournamentParams): Tourname
     }
 
     // Playoff bracket based on number of groups:
-    // If 2 groups (A & B): 4 teams in playoffs (SF1: 1A vs 2B, SF2: 1B vs 2A -> Grand Final)
-    // If 4 groups (A, B, C, D): 8 teams in playoffs (QF1: 1A vs 2B, QF2: 1C vs 2D, QF3: 1B vs 2A, QF4: 1D vs 2C -> SF -> Grand Final)
+    // Two 8-team GSL groups send six teams: 2A vs 3B (winner meets 1B), 2B vs 3A (winner meets 1A).
+    // Four smaller groups retain the eight-team playoff bracket.
     const sfFmt = stageFormats.semifinalFormat || 'BO3';
     const finalFmt = stageFormats.finalFormat || 'BO5';
     const qfFmt = stageFormats.quarterfinalFormat || 'BO3';
@@ -1893,8 +1901,8 @@ export function createCustomTournament(params: CreateTournamentParams): Tourname
       playoffMatches = [
         { id: 'playoff_qf1', stage: 'playoffs', poolKey: 'qf1', roundNumber: 1, name: 'Четвертьфинал 1 (2-е место A vs 3-е место B)', scoreA: 0, scoreB: 0, format: qfFmt, status: 'scheduled' },
         { id: 'playoff_qf2', stage: 'playoffs', poolKey: 'qf2', roundNumber: 1, name: 'Четвертьфинал 2 (2-е место B vs 3-е место A)', scoreA: 0, scoreB: 0, format: qfFmt, status: 'scheduled' },
-        { id: 'playoff_sf1', stage: 'playoffs', poolKey: 'sf1', roundNumber: 2, name: 'Полуфинал 1 (1-е место A vs победитель QF1)', scoreA: 0, scoreB: 0, format: sfFmt, status: 'scheduled', directSeedA: true },
-        { id: 'playoff_sf2', stage: 'playoffs', poolKey: 'sf2', roundNumber: 2, name: 'Полуфинал 2 (1-е место B vs победитель QF2)', scoreA: 0, scoreB: 0, format: sfFmt, status: 'scheduled', directSeedA: true },
+        { id: 'playoff_sf1', stage: 'playoffs', poolKey: 'sf1', roundNumber: 2, name: 'Полуфинал 1 (1-е место B vs победитель QF1)', scoreA: 0, scoreB: 0, format: sfFmt, status: 'scheduled', directSeedA: true },
+        { id: 'playoff_sf2', stage: 'playoffs', poolKey: 'sf2', roundNumber: 2, name: 'Полуфинал 2 (1-е место A vs победитель QF2)', scoreA: 0, scoreB: 0, format: sfFmt, status: 'scheduled', directSeedA: true },
         { id: 'playoff_final', stage: 'playoffs', poolKey: 'final', roundNumber: 3, name: 'Гранд-финал', scoreA: 0, scoreB: 0, format: finalFmt, status: 'scheduled' }
       ];
     } else if (groupCount === 2) {
@@ -2062,10 +2070,15 @@ export function updateGroupMatchResult(
     // Update group qualifiers. Eight-team groups send the upper-final winner,
     // upper-final loser, and lower-final winner (places 1-3) to the playoffs.
     const upperFinal = group.matches.find((m) => m.poolKey === `gsl_${gLetter}_uf`);
-    const lowerFinal = group.matches.find((m) => m.poolKey === `gsl_${gLetter}_lf`);
+    const lowerFinal = group.matches.find((m) => m.poolKey === `gsl_${gLetter}_ls`);
     if (upperFinal || lowerFinal) {
+      // The upper-final winner is 1st, its loser is 2nd, and the lower-final winner is 3rd.
       group.qualifiedTeamIds = [upperFinal?.winnerId, upperFinal?.loserId, lowerFinal?.winnerId].filter(Boolean) as string[];
-      group.eliminatedTeamIds = group.matches.filter((m) => m.status === 'finished').flatMap((m) => [m.loserId]).filter(Boolean) as string[];
+      // Only losses in the lower bracket eliminate teams; the upper-final loser still qualifies for 2nd place.
+      group.eliminatedTeamIds = group.matches
+        .filter((m) => m.status === 'finished' && /^gsl_[A-Z]_l[12]_|^gsl_[A-Z]_ls$/.test(m.poolKey))
+        .map((m) => m.loserId)
+        .filter(Boolean) as string[];
     } else {
     const qualified: string[] = [];
     const eliminated: string[] = [];
@@ -2123,8 +2136,8 @@ export function updateGroupMatchResult(
       const sf2 = currentTour.playoffMatches.find((m) => m.poolKey === 'sf2');
       if (qf1) { qf1.teamAId = seed2A; qf1.teamBId = seed3B; qf1.status = qf1.teamAId && qf1.teamBId ? 'ready' : 'scheduled'; }
       if (qf2) { qf2.teamAId = seed2B; qf2.teamBId = seed3A; qf2.status = qf2.teamAId && qf2.teamBId ? 'ready' : 'scheduled'; }
-      if (sf1) { sf1.teamAId = seed1A; sf1.status = sf1.teamAId && sf1.teamBId ? 'ready' : 'scheduled'; }
-      if (sf2) { sf2.teamAId = seed1B; sf2.status = sf2.teamAId && sf2.teamBId ? 'ready' : 'scheduled'; }
+      if (sf1) { sf1.teamAId = seed1B; sf1.status = sf1.teamAId && sf1.teamBId ? 'ready' : 'scheduled'; }
+      if (sf2) { sf2.teamAId = seed1A; sf2.status = sf2.teamAId && sf2.teamBId ? 'ready' : 'scheduled'; }
     } else if (groupsList.length === 2 && currentTour.playoffMatches) {
       // 2 Groups -> 4 teams into Semifinals
       const sf1 = currentTour.playoffMatches.find((m) => m.poolKey === 'sf1');
