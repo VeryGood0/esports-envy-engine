@@ -135,8 +135,13 @@ export const PredictionHistory: React.FC<PredictionHistoryProps> = ({
                 )}
               </div>
 
-              <div className="text-[11px] text-slate-500 font-mono">
-                {item.timestamp ? new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+              <div className="flex flex-col items-end gap-1 text-[11px] text-slate-500 font-mono">
+                {item.tournamentName && (
+                  <span className="max-w-full text-right text-[10px] text-amber-300/90" title={`${item.tournamentName}${item.tournamentStage ? ` · ${item.tournamentStage}` : ''}`}>
+                    {item.tournamentName}{item.tournamentStage ? ` · ${item.tournamentStage}` : ''}
+                  </span>
+                )}
+                <span>{item.timestamp ? new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}</span>
               </div>
             </div>
           );

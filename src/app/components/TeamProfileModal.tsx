@@ -661,6 +661,11 @@ export const TeamProfileModal: React.FC<TeamProfileModalProps> = ({
                                 <span>{r.result}</span>
                                 <span className="text-slate-300 font-normal">vs {r.opponentName}</span>
                                 <span className="text-slate-400 text-[9px]">({r.score})</span>
+                                {r.tournamentName && (
+                                  <span className="max-w-[150px] truncate text-[9px] font-normal text-amber-300/90" title={`${r.tournamentName}${r.stageName ? ` · ${r.stageName}` : ''}`}>
+                                    {r.tournamentName}{r.stageName ? ` · ${r.stageName}` : ''}
+                                  </span>
+                                )}
                               </span>
                             ))}
                           </div>
@@ -805,6 +810,11 @@ export const TeamProfileModal: React.FC<TeamProfileModalProps> = ({
                                 {opp.name}
                               </span>
                             </div>
+                            {m.tournamentName && (
+                              <span className="max-w-[180px] truncate text-[10px] text-amber-300/90" title={`${m.tournamentName}${m.tournamentStage ? ` · ${m.tournamentStage}` : ''}`}>
+                                {m.tournamentName}{m.tournamentStage ? ` · ${m.tournamentStage}` : ''}
+                              </span>
+                            )}
                           </div>
 
                           <div className="flex items-center gap-3 shrink-0">

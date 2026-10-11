@@ -317,7 +317,8 @@ export function applyDynamicMapOutcome(
   won: boolean,
   scoreWon: number,
   scoreLost: number,
-  opponent: Team
+  opponent: Team,
+  metadata?: { matchId?: string | undefined; tournamentId?: string | undefined; tournamentName?: string | undefined; stageName?: string | undefined; date?: string | undefined }
 ): TeamMapProfile {
   const updatedMaps = { ...currentProfile.maps };
   const currentStat = updatedMaps[mapName];
@@ -354,8 +355,12 @@ export function applyDynamicMapOutcome(
     opponentName: opponent.shortName || opponent.name,
     result: (won ? 'W' : 'L') as 'W' | 'L',
     score: `${scoreWon}:${scoreLost}`, // Always TeamScore:OpponentScore
-    date: 'Только что',
-    oppRating: opponent.mapProfile?.overallRating || 75
+    date: metadata?.date || 'Только что',
+    oppRating: opponent.mapProfile?.overallRating || 75,
+    tournamentId: metadata?.tournamentId,
+    tournamentName: metadata?.tournamentName,
+    stageName: metadata?.stageName,
+    matchId: metadata?.matchId
   };
 
   const newRecent = [newResultItem, ...currentStat.recentResults.slice(0, 4)];

@@ -1,5 +1,5 @@
 // @ts-nocheck -- imported legacy code written for a looser tsconfig
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Team, MatchFormat, MatchPrediction, Trophy as TrophyItem } from './types';
 import { INITIAL_TEAMS } from './data/teams';
 import {
@@ -24,20 +24,20 @@ import { PredictionHistory } from './components/PredictionHistory';
 import { TournamentHub } from './components/TournamentHub';
 import { MapMatchupComparisonView } from './components/MapMatchupComparisonView';
 import { MapVetoModal } from './components/MapVetoModal';
-import { TEAM_MAP_PROFILES, getBaselineMapProfile, createZeroMapProfile } from './data/mapPool';
+import { createZeroMapProfile } from './data/mapPool';
 import { createInitialSwissTournament } from './utils/tournament';
 import { TournamentState, VetoState, MatchSeriesMapResult } from './types';
 import { executeCompleteAutoVeto } from './utils/vetoEngine';
 import {
   simulateCS2MapScore,
-  applyDynamicMapOutcome,
   simulateSeriesOnVeto
 } from './utils/mapSimulation';
 
-import { Sliders, Image, Trophy, Swords, GitBranch, SlidersHorizontal, Settings } from 'lucide-react';
+import { Sliders, Image, Trophy, Swords, GitBranch, SlidersHorizontal, Settings, Trash2 } from 'lucide-react';
 import { SettingsModal } from './components/SettingsModal';
 import arenaBg from './assets/images/cs2_arena_stage_1791213016355.jpg';
 import { DataManagementModal } from './components/DataManagementModal';
+import { MapStatsLedger, appendMapStatsEvent, emptyMapStatsLedger, replayMapStatsLedger, removeTournamentFromMapStatsLedger } from './utils/mapStatsLedger';
 
 export default function App() {
   // 1. Teams State with LocalStorage Persistence & Version Migration
@@ -121,7 +121,7 @@ export default function App() {
   }, [teams]);
 
   // Tab State: 'predictor' | 'leaderboard' | 'tournament'
-  const [activeTab, setActiveTab] = useState<'predictor' | 'leaderboard' | 'tournament'>('predictor');
+  const [activeTab, setActiveTab] = useState<'predictor' | 'leaderboard' | 'tournament' | 'archive'>('predictor');
   const [inspectTeam, setInspectTeam] = useState<Team | null>(null);
 
   // Tournament State (null by default until user creates one!)
@@ -151,6 +151,26 @@ export default function App() {
       // Ignore
     }
   }, [tournament]);
+
+  // Completed tournaments are kept independently from the active bracket.
+  const [archivedTournaments, setArchivedTournaments] = useState<TournamentState[]>(() => {
+    try {
+      const saved = localStorage.getItem('cs2_tournament_archive');
+      const parsed = saved ? JSON.parse(saved) : [];
+      return Array.isArray(parsed) ? parsed.filter((item) => item?.id && item?.currentStage === 'completed') : [];
+    } catch {
+      return [];
+    }
+  });
+
+  useEffect(() => {
+    try { localStorage.setItem('cs2_tournament_archive', JSON.stringify(archivedTournaments)); } catch { /* Ignore storage limits */ }
+  }, [archivedTournaments]);
+
+  useEffect(() => {
+    if (!tournament || tournament.currentStage !== 'completed') return;
+    setArchivedTournaments((prev) => prev.some((item) => item.id === tournament.id) ? prev : [tournament, ...prev]);
+  }, [tournament?.id, tournament?.currentStage]);
 
   // 2. Active Match Teams
   const [teamAId, setTeamAId] = useState<string>('vitality'); // Vitality
@@ -231,6 +251,10 @@ export default function App() {
             deltaPointsB: item.deltaPointsB,
             deltaFormA: item.deltaFormA,
             deltaFormB: item.deltaFormB,
+            mapsPlayed: Array.isArray(item.mapsPlayed) ? item.mapsPlayed : undefined,
+            tournamentId: item.tournamentId,
+            tournamentName: item.tournamentName,
+            tournamentStage: item.tournamentStage,
             isUpset: !!item.isUpset
           }));
         }
@@ -242,9 +266,57 @@ export default function App() {
   });
 
   const saveHistory = useCallback((newHistory: MatchPrediction[]) => {
-    setHistory(newHistory);
-    localStorage.setItem('cs2_match_history', JSON.stringify(newHistory.slice(0, 40)));
+    const trimmed = newHistory.slice(0, 40);
+    setHistory(trimmed);
+    localStorage.setItem('cs2_match_history', JSON.stringify(trimmed));
   }, []);
+
+  const [mapStatsLedger, setMapStatsLedger] = useState<MapStatsLedger>(() => {
+    try {
+      const saved = localStorage.getItem('cs2_map_stats_ledger');
+      const parsed = saved ? JSON.parse(saved) : null;
+      return parsed && Array.isArray(parsed.events) && parsed.baselineProfiles ? parsed : emptyMapStatsLedger();
+    } catch {
+      return emptyMapStatsLedger();
+    }
+  });
+  const mapStatsLedgerRef = useRef<MapStatsLedger>(mapStatsLedger);
+  useEffect(() => {
+    mapStatsLedgerRef.current = mapStatsLedger;
+    try { localStorage.setItem('cs2_map_stats_ledger', JSON.stringify(mapStatsLedger)); } catch { /* Ignore storage limits */ }
+  }, [mapStatsLedger]);
+
+  const recordMapStatsEvent = useCallback((input: {
+    id?: string;
+    timestamp?: number;
+    teamAId: string;
+    teamBId: string;
+    mapsPlayed?: MatchSeriesMapResult[];
+    tournamentId?: string;
+    tournamentName?: string;
+    stageName?: string;
+  }) => {
+    if (!input.mapsPlayed?.length || !input.teamAId || !input.teamBId) return;
+    const currentLedger = mapStatsLedgerRef.current;
+    const timestamp = input.timestamp || Date.now();
+    const eventId = input.id || `map_event_${timestamp}_${currentLedger.events.length + 1}`;
+    // Guard against accidental double-recording if a match handler is retried.
+    if (currentLedger.events.some((event) => event.id === eventId)) return;
+    const nextLedger = appendMapStatsEvent(currentLedger, {
+      id: eventId,
+      timestamp,
+      teamAId: input.teamAId,
+      teamBId: input.teamBId,
+      mapsPlayed: input.mapsPlayed,
+      tournamentId: input.tournamentId,
+      tournamentName: input.tournamentName,
+      stageName: input.stageName
+    }, teams);
+    mapStatsLedgerRef.current = nextLedger;
+    setMapStatsLedger(nextLedger);
+    try { localStorage.setItem('cs2_map_stats_ledger', JSON.stringify(nextLedger)); } catch { /* Ignore storage limits */ }
+    setTeams((prev) => replayMapStatsLedger(prev, nextLedger));
+  }, [teams]);
 
   const requiredWins = getRequiredWins(format);
 
@@ -376,38 +448,7 @@ export default function App() {
     const updatedSeriesMaps = [...seriesMapsPlayed, newMapRecord];
     setSeriesMapsPlayed(updatedSeriesMaps);
 
-    // Apply dynamic map outcome: updates map rating, form and winrates for both teams
-    setTeams((prev) =>
-      prev.map((t) => {
-        if (t.id === teamA.id && t.mapProfile) {
-          return {
-            ...t,
-            mapProfile: applyDynamicMapOutcome(
-              t.mapProfile,
-              targetMapObj.mapName,
-              aWon,
-              mapSimResult.scoreA,
-              mapSimResult.scoreB,
-              teamB
-            )
-          };
-        }
-        if (t.id === teamB.id && t.mapProfile) {
-          return {
-            ...t,
-            mapProfile: applyDynamicMapOutcome(
-              t.mapProfile,
-              targetMapObj.mapName,
-              !aWon,
-              mapSimResult.scoreB,
-              mapSimResult.scoreA,
-              teamA
-            )
-          };
-        }
-        return t;
-      })
-    );
+    recordMapStatsEvent({ teamAId: teamA.id, teamBId: teamB.id, mapsPlayed: [newMapRecord] });
 
     setScoreA(newScoreA);
     setScoreB(newScoreB);
@@ -515,46 +556,7 @@ export default function App() {
     setStatus('FINISHED');
     soundFx.playVictory();
 
-    // Update dynamic map ratings for all maps played
-    let updatedTeamA = teamA;
-    let updatedTeamB = teamB;
-    for (const played of simResult.mapsPlayed) {
-      const aWon = played.winnerTeamId === teamA.id;
-      if (updatedTeamA.mapProfile) {
-        updatedTeamA = {
-          ...updatedTeamA,
-          mapProfile: applyDynamicMapOutcome(
-            updatedTeamA.mapProfile,
-            played.mapName,
-            aWon,
-            played.scoreA,
-            played.scoreB,
-            updatedTeamB
-          )
-        };
-      }
-      if (updatedTeamB.mapProfile) {
-        updatedTeamB = {
-          ...updatedTeamB,
-          mapProfile: applyDynamicMapOutcome(
-            updatedTeamB.mapProfile,
-            played.mapName,
-            !aWon,
-            played.scoreB,
-            played.scoreA,
-            updatedTeamA
-          )
-        };
-      }
-    }
-
-    setTeams((prev) =>
-      prev.map((t) => {
-        if (t.id === teamA.id) return updatedTeamA;
-        if (t.id === teamB.id) return updatedTeamB;
-        return t;
-      })
-    );
+    recordMapStatsEvent({ teamAId: teamA.id, teamBId: teamB.id, mapsPlayed: simResult.mapsPlayed });
 
     const winnerId = simResult.winnerTeamId;
     const winnerTeam = simResult.winnerTeamId === teamA.id ? teamA : teamB;
@@ -658,6 +660,9 @@ export default function App() {
   };
 
   const handleResetMapsToBaseline = () => {
+    mapStatsLedgerRef.current = emptyMapStatsLedger();
+    setMapStatsLedger(emptyMapStatsLedger());
+    localStorage.removeItem('cs2_map_stats_ledger');
     setTeams((prev) =>
       prev.map((t) => ({
         ...t,
@@ -687,6 +692,9 @@ export default function App() {
   };
 
   const handleResetTeamFormAndMapsOnly = () => {
+    mapStatsLedgerRef.current = emptyMapStatsLedger();
+    setMapStatsLedger(emptyMapStatsLedger());
+    localStorage.removeItem('cs2_map_stats_ledger');
     setTeams((prev) =>
       prev.map((t) => ({
         ...t,
@@ -722,6 +730,11 @@ export default function App() {
     }));
     setTeams(resetTeams);
     setTournament(null);
+    setArchivedTournaments([]);
+    mapStatsLedgerRef.current = emptyMapStatsLedger();
+    setMapStatsLedger(emptyMapStatsLedger());
+    localStorage.removeItem('cs2_tournament_archive');
+    localStorage.removeItem('cs2_map_stats_ledger');
     localStorage.removeItem('cs2_teams_data');
     localStorage.removeItem('cs2_teams_version');
     localStorage.removeItem('cs2_match_history');
@@ -739,6 +752,77 @@ export default function App() {
   const handleClearHistoryAndResetStats = () => {
     soundFx.playClick();
     handleResetAllData();
+  };
+
+  const handleDeleteTournamentCompletely = (tour: TournamentState) => {
+    const uniqueMatches = new Map<string, any>();
+    const matchLists = [
+      tour.swissMatches || [], tour.groupMatches || [], tour.playoffMatches || [],
+      tour.lowerBracketMatches || [], tour.roundRobinMatches || [],
+      ...(tour.grandFinalMatch ? [[tour.grandFinalMatch]] : []),
+      ...(tour.groups || []).map((group) => group.matches || [])
+    ];
+    matchLists.flat().forEach((match: any) => { if (match?.id) uniqueMatches.set(match.id, match); });
+
+    const pointsToRemove: Record<string, number> = {};
+    for (const match of uniqueMatches.values()) {
+      if (match.status !== 'finished') continue;
+      if (match.teamAId) pointsToRemove[match.teamAId] = (pointsToRemove[match.teamAId] || 0) + (match.deltaPointsA || 0);
+      if (match.teamBId) pointsToRemove[match.teamBId] = (pointsToRemove[match.teamBId] || 0) + (match.deltaPointsB || 0);
+    }
+
+    // Remove tournament awards too; these are separate from per-match VRS deltas.
+    const bonusToRemove: Record<string, number> = {};
+    if (tour.standings?.length) {
+      tour.standings.forEach((standing) => {
+        // Without a played 3rd-place match, semifinalists are listed as 3rd/4th
+        // for display only; the tournament never actually awarded them VRS.
+        const awardWasApplied = tour.includeThirdPlace ? standing.place <= 3 : standing.place <= 2;
+        if (awardWasApplied && standing.teamId && typeof standing.vrsAwarded === 'number') {
+          bonusToRemove[standing.teamId] = (bonusToRemove[standing.teamId] || 0) + standing.vrsAwarded;
+        }
+      });
+    } else {
+      teams.forEach((team) => {
+        const trophy = (team.trophies || []).find((item) => item.tournamentId === tour.id);
+        if (trophy?.vrsPointsAwarded) bonusToRemove[team.id] = (bonusToRemove[team.id] || 0) + trophy.vrsPointsAwarded;
+      });
+    }
+
+    const nextLedger = removeTournamentFromMapStatsLedger(mapStatsLedgerRef.current, tour.id);
+    mapStatsLedgerRef.current = nextLedger;
+    setMapStatsLedger(nextLedger);
+    try { localStorage.setItem('cs2_map_stats_ledger', JSON.stringify(nextLedger)); } catch { /* Ignore storage limits */ }
+
+    setTeams((prev) => {
+      const adjusted = prev.map((team) => {
+        const removedPoints = (pointsToRemove[team.id] || 0) + (bonusToRemove[team.id] || 0);
+        const trophies = (team.trophies || []).filter((item) => item.tournamentId !== tour.id);
+        return {
+          ...team,
+          points: Math.max(100, team.points - removedPoints),
+          trophies,
+          trophiesCount: trophies.length
+        };
+      });
+      return replayMapStatsLedger(adjusted, nextLedger);
+    });
+
+    setHistory((prev) => {
+      const filtered = prev.filter((match) => match.tournamentId !== tour.id);
+      try { localStorage.setItem('cs2_match_history', JSON.stringify(filtered.slice(0, 40))); } catch { /* Ignore */ }
+      return filtered;
+    });
+    setArchivedTournaments((prev) => prev.filter((item) => item.id !== tour.id));
+    if (tournament?.id === tour.id) {
+      setTournament(null);
+      try { localStorage.removeItem('cs2_tournament_state'); } catch { /* Ignore */ }
+    } else if (tournament) {
+      // Deleting an archived tournament must not erase a different active tournament.
+      try { localStorage.setItem('cs2_tournament_state', JSON.stringify(tournament)); } catch { /* Ignore */ }
+    } else {
+      try { localStorage.removeItem('cs2_tournament_state'); } catch { /* Ignore */ }
+    }
   };
 
   const handleSelectTeamFromLeaderboard = (team: Team) => {
@@ -819,6 +903,14 @@ export default function App() {
             >
               <GitBranch className="w-3.5 h-3.5" />
               <span>Сетка турнира</span>
+            </button>
+            <button
+              onClick={() => { soundFx.playClick(); setActiveTab('archive'); }}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${activeTab === 'archive' ? 'bg-amber-500 text-black shadow-sm font-bold' : 'text-slate-400 hover:text-white'}`}
+            >
+              <Trophy className="w-3.5 h-3.5" />
+              <span>Прошедшие турниры</span>
+              <span className="text-[10px] opacity-75 font-mono">({archivedTournaments.length})</span>
             </button>
           </div>
         </div>
@@ -954,14 +1046,78 @@ export default function App() {
             onSelectTeamForMatch={handleSelectTeamFromLeaderboard}
             onOpenPointsEditor={() => setIsPointsEditorOpen(true)}
           />
+        ) : activeTab === 'archive' ? (
+          <section className="mx-auto w-full max-w-6xl space-y-5">
+            <div className="rounded-3xl border border-slate-800 bg-[#0f1420]/95 p-5 sm:p-6">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-xl font-extrabold text-white">Архив турниров</h2>
+                  <p className="mt-1 text-xs text-slate-400">Завершённые турниры, результаты матчей и влияние на статистику команд.</p>
+                </div>
+                <span className="rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-xs font-mono text-slate-300">Всего: {archivedTournaments.length}</span>
+              </div>
+            </div>
+            {archivedTournaments.length === 0 ? (
+              <div className="rounded-3xl border border-dashed border-slate-700 bg-slate-900/40 p-12 text-center">
+                <Trophy className="mx-auto h-9 w-9 text-slate-600" />
+                <h3 className="mt-3 text-sm font-bold text-slate-300">Пока нет завершённых турниров</h3>
+                <p className="mt-1 text-xs text-slate-500">Когда турнир завершится, он автоматически появится здесь.</p>
+              </div>
+            ) : [...archivedTournaments].sort((a, b) => (b.startDate || '').localeCompare(a.startDate || '')).map((tour) => {
+              const championId = tour.standings?.find((standing) => standing.place === 1)?.teamId;
+              const champion = teams.find((team) => team.id === championId);
+              const completedMatches = [ ...(tour.swissMatches || []), ...(tour.groupMatches || []), ...(tour.playoffMatches || []), ...(tour.roundRobinMatches || []), ...(tour.lowerBracketMatches || []) ];
+              const playedCount = new Set(completedMatches.filter((match) => match.status === 'finished').map((match) => match.id)).size;
+              return (
+                <article key={tour.id} className="rounded-2xl border border-slate-800 bg-[#0f1420]/90 p-4 sm:p-5">
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex min-w-0 items-start gap-3">
+                      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-amber-500/30 bg-amber-500/10"><Trophy className="h-5 w-5 text-amber-400" /></div>
+                      <div className="min-w-0">
+                        <h3 className="break-words text-base font-extrabold text-white">{tour.name || 'Турнир без названия'}</h3>
+                        <p className="mt-1 text-xs text-slate-400">{tour.tier || 'Турнир'} · {tour.teamCount || tour.participatingTeamIds?.length || 0} команд · {playedCount} сыгранных матчей</p>
+                        <p className="mt-1 text-xs text-slate-500">Дата начала: {tour.startDate || 'не указана'}{champion ? ` · Чемпион: ${champion.name}` : ''}</p>
+                      </div>
+                    </div>
+                    <button type="button" onClick={() => { if (window.confirm(`Полностью удалить турнир «${tour.name || 'без названия'}» и отменить его влияние на VRS и статистику карт?`)) handleDeleteTournamentCompletely(tour); }} className="flex shrink-0 items-center justify-center gap-2 rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-2.5 text-xs font-bold text-rose-300 hover:bg-rose-500/20"><Trash2 className="h-3.5 w-3.5" />Удалить турнир</button>
+                  </div>
+                  {tour.standings?.length ? <div className="mt-4 flex flex-wrap gap-2 border-t border-slate-800 pt-3">{tour.standings.slice(0, 3).map((standing) => { const team = teams.find((item) => item.id === standing.teamId); return <span key={`${standing.place}-${standing.teamId}`} className="rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-1.5 text-[11px] text-slate-300">{standing.place}. {team?.name || standing.teamId}{typeof standing.vrsAwarded === 'number' ? ` · +${standing.vrsAwarded} VRS` : ''}</span>; })}</div> : null}
+                </article>
+              );
+            })}
+          </section>
         ) : (
           /* Tournament Stage Brackets Tab */
           <TournamentHub
             teams={teams}
             tournament={tournament}
             onUpdateTournament={setTournament}
-            onUpdateTeams={setTeams}
-            onRecordMatchPrediction={(pred) => saveHistory([pred, ...history])}
+            onDeleteTournament={handleDeleteTournamentCompletely}
+            onUpdateTeams={(updatedTeams) => setTeams((prev) => prev.map((current) => {
+              const replacement = updatedTeams.find((updated) => updated.id === current.id);
+              return replacement ? { ...current, trophies: replacement.trophies, trophiesCount: replacement.trophiesCount } : current;
+            }))}
+            onApplyVrsPoints={(changes) => setTeams((prev) => prev.map((team) => {
+              const delta = changes.filter((change) => change.teamId === team.id).reduce((sum, change) => sum + change.delta, 0);
+              return delta ? { ...team, points: Math.max(100, team.points + delta) } : team;
+            }))}
+            onRecordMatchPrediction={(pred) => {
+              setHistory((prev) => {
+                const next = [pred, ...prev].slice(0, 40);
+                try { localStorage.setItem('cs2_match_history', JSON.stringify(next)); } catch { /* Ignore */ }
+                return next;
+              });
+              recordMapStatsEvent({
+                id: pred.id,
+                timestamp: pred.timestamp,
+                teamAId: pred.teamAId,
+                teamBId: pred.teamBId,
+                mapsPlayed: pred.mapsPlayed,
+                tournamentId: pred.tournamentId,
+                tournamentName: pred.tournamentName,
+                stageName: pred.tournamentStage
+              });
+            }}
             history={history}
             onOpenDataManagement={() => setIsDataModalOpen(true)}
           />

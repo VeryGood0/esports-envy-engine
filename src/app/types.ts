@@ -26,6 +26,10 @@ export interface MapRecentMatch {
   score: string; // e.g. "13:9", "16:14"
   date: string; // e.g. "12 дней назад"
   oppRating: number; // e.g. 88
+  tournamentId?: string;
+  tournamentName?: string;
+  stageName?: string;
+  matchId?: string;
 }
 
 export interface TeamMapStats {
@@ -142,6 +146,9 @@ export interface MatchPrediction {
   deltaFormA?: number; // actual form change from this match
   deltaFormB?: number;
   mapsPlayed?: MatchSeriesMapResult[];
+  tournamentId?: string;
+  tournamentName?: string;
+  tournamentStage?: string;
 }
 
 export interface OutcomeOdds {
@@ -240,6 +247,8 @@ export interface TournamentGroup {
   matches: TournamentMatch[];
   qualifiedTeamIds?: string[]; // ordered group qualifiers advancing to playoffs
   eliminatedTeamIds?: string[];
+  /** Bracket rules used by this group, needed to render and qualify teams correctly. */
+  groupStyle?: 'gsl' | 'gsl_top3' | 'round_robin';
 }
 
 export interface RoundRobinTableRow {
@@ -255,7 +264,9 @@ export interface StageFormatSettings {
   groupStageFormat?: MatchFormat;
   groupFormat?: MatchFormat;
   groupCount?: number; // number of groups
-  groupStyle?: 'gsl' | 'round_robin';
+  groupStyle?: 'gsl' | 'gsl_top3' | 'round_robin';
+  /** In 8-team GSL groups, cross routes Upper SF losers into opposite Lower SFs when set. */
+  gslLowerSemiLoserRouting?: 'same' | 'swapped';
   swissNormalFormat?: MatchFormat;
   swissDeciderFormat?: MatchFormat;
   quarterfinalFormat?: MatchFormat;
@@ -276,7 +287,7 @@ export interface TournamentState {
   championVrsBonus?: number;
   teamCount?: number;
   groupCount?: number; // number of groups
-  groupStyle?: 'gsl' | 'round_robin';
+  groupStyle?: 'gsl' | 'gsl_top3' | 'round_robin';
   groupAdvancementCount?: number; // default 2
   participatingTeamIds?: string[];
   teamSeeds?: Record<string, number>;

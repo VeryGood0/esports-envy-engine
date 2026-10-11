@@ -35,7 +35,7 @@ import {
   createCustomTournament
 } from '../utils/tournament';
 import { executeCompleteAutoVeto } from '../utils/vetoEngine';
-import { simulateSeriesOnVeto, applyDynamicMapOutcome } from '../utils/mapSimulation';
+import { simulateSeriesOnVeto } from '../utils/mapSimulation';
 import { soundFx } from '../utils/audio';
 import {
   Trophy,
@@ -57,7 +57,9 @@ interface TournamentHubProps {
   teams: Team[];
   tournament: TournamentState | null;
   onUpdateTournament: (tour: TournamentState | null) => void;
+  onDeleteTournament?: (tour: TournamentState) => void;
   onUpdateTeams?: (teams: Team[]) => void;
+  onApplyVrsPoints?: (changes: { teamId: string; delta: number }[]) => void;
   onRecordMatchPrediction?: (prediction: MatchPrediction) => void;
   history?: MatchPrediction[];
   onOpenDataManagement?: () => void;
@@ -67,7 +69,9 @@ export const TournamentHub: React.FC<TournamentHubProps> = ({
   teams,
   tournament,
   onUpdateTournament,
+  onDeleteTournament,
   onUpdateTeams,
+  onApplyVrsPoints,
   onRecordMatchPrediction,
   history = [],
   onOpenDataManagement
@@ -514,10 +518,24 @@ export const TournamentHub: React.FC<TournamentHubProps> = ({
   // 10. Toggle 3rd Place match
   const handleToggleThirdPlace = () => {
     const nextInclude = !tournament.includeThirdPlace;
-    onUpdateTournament({
-      ...tournament,
-      includeThirdPlace: nextInclude
-    });
+    let playoffMatches = [...(tournament.playoffMatches || [])];
+    const existingThird = playoffMatches.find((match) => match.poolKey === 'third_place' || match.poolKey === 'third' || match.id.endsWith('_third_place') || match.name.toLowerCase().includes('3-е место'));
+    if (nextInclude && !existingThird) {
+      const sf1 = playoffMatches.find((match) => match.poolKey === 'sf1');
+      const sf2 = playoffMatches.find((match) => match.poolKey === 'sf2');
+      const teamAId = sf1?.loserId;
+      const teamBId = sf2?.loserId;
+      playoffMatches.push({
+        id: `${tournament.id}_third_place`, stage: 'playoffs', poolKey: 'third_place',
+        roundNumber: Math.max(1, (sf1?.roundNumber || 1) + 1), name: 'Матч за 3-е место (Бронзовый финал)',
+        teamAId, teamBId, scoreA: 0, scoreB: 0,
+        format: tournament.stageFormats?.semifinalFormat || 'BO3',
+        status: teamAId && teamBId ? 'ready' : 'scheduled'
+      });
+    } else if (!nextInclude) {
+      playoffMatches = playoffMatches.filter((match) => match !== existingThird);
+    }
+    onUpdateTournament({ ...tournament, includeThirdPlace: nextInclude, playoffMatches });
   };
 
   // Helper to record match stats (VRS & Form)
@@ -557,14 +575,21 @@ export const TournamentHub: React.FC<TournamentHubProps> = ({
       finalDeltaFmB = calculated.deltaFormB;
     }
 
-    // Live update VRS points
-    if (onUpdateTeams && finalDeltaPtsA !== undefined && finalDeltaPtsB !== undefined) {
-      const updated = teams.map((t) => {
-        if (t.id === teamA.id) return { ...t, points: Math.max(100, t.points + finalDeltaPtsA!) };
-        if (t.id === teamB.id) return { ...t, points: Math.max(100, t.points + finalDeltaPtsB!) };
-        return t;
-      });
-      onUpdateTeams(updated);
+    // Apply deltas additively so fast/full tournament simulations cannot overwrite earlier matches.
+    if (finalDeltaPtsA !== undefined && finalDeltaPtsB !== undefined) {
+      if (onApplyVrsPoints) {
+        onApplyVrsPoints([
+          { teamId: teamA.id, delta: finalDeltaPtsA },
+          { teamId: teamB.id, delta: finalDeltaPtsB }
+        ]);
+      } else if (onUpdateTeams) {
+        const updated = teams.map((t) => {
+          if (t.id === teamA.id) return { ...t, points: Math.max(100, t.points + finalDeltaPtsA!) };
+          if (t.id === teamB.id) return { ...t, points: Math.max(100, t.points + finalDeltaPtsB!) };
+          return t;
+        });
+        onUpdateTeams(updated);
+      }
     }
 
     // Live update match history for dynamic form tracking
@@ -588,6 +613,9 @@ export const TournamentHub: React.FC<TournamentHubProps> = ({
         deltaFormA: finalDeltaFmA,
         deltaFormB: finalDeltaFmB,
         mapsPlayed: mapsPlayed || match.mapsPlayed,
+        tournamentId: tournament.id,
+        tournamentName: tournament.name || 'Турнир',
+        tournamentStage: match.name || match.stage,
         isUpset: winnerTeam.points < loserTeam.points && loserTeam.points - winnerTeam.points >= 80
       });
     }
@@ -642,26 +670,21 @@ export const TournamentHub: React.FC<TournamentHubProps> = ({
           };
           return {
             ...t,
-            points: t.points + bounties.championBonus,
             trophiesCount: currentTrophies.length + 1,
             trophies: [newTrophy, ...currentTrophies]
-          };
-        }
-        if (t.id === finalistId) {
-          return {
-            ...t,
-            points: t.points + bounties.finalistBonus
-          };
-        }
-        if (t.id === thirdId && tourState.includeThirdPlace) {
-          return {
-            ...t,
-            points: t.points + bounties.thirdPlaceBonus
           };
         }
         return t;
       });
       onUpdateTeams(updatedTeams);
+      if (onApplyVrsPoints) {
+        const awards = [
+          ...(champId ? [{ teamId: champId, delta: bounties.championBonus }] : []),
+          ...(finalistId ? [{ teamId: finalistId, delta: bounties.finalistBonus }] : []),
+          ...(thirdId && tourState.includeThirdPlace ? [{ teamId: thirdId, delta: bounties.thirdPlaceBonus }] : [])
+        ];
+        onApplyVrsPoints(awards);
+      }
     }
 
     const completedTour: TournamentState = {
@@ -949,24 +972,6 @@ export const TournamentHub: React.FC<TournamentHubProps> = ({
     const veto = executeCompleteAutoVeto(match.format, tA, tB);
     const seriesResult = simulateSeriesOnVeto(match.format, tA, tB, veto.selectedMapsInOrder);
 
-    // Apply dynamic map outcomes
-    if (tA.mapProfile && tB.mapProfile) {
-      let profA = tA.mapProfile;
-      let profB = tB.mapProfile;
-      for (const m of seriesResult.mapsPlayed) {
-        profA = applyDynamicMapOutcome(profA, m.mapName, m.winnerTeamId === tA.id, m.scoreA, m.scoreB, tB);
-        profB = applyDynamicMapOutcome(profB, m.mapName, m.winnerTeamId === tB.id, m.scoreB, m.scoreA, tA);
-      }
-      if (onUpdateTeams) {
-        onUpdateTeams(
-          teams.map((t) => {
-            if (t.id === tA.id) return { ...t, mapProfile: profA };
-            if (t.id === tB.id) return { ...t, mapProfile: profB };
-            return t;
-          })
-        );
-      }
-    }
 
     handleConfirmMatchResult(
       match.id,
@@ -1469,7 +1474,10 @@ export const TournamentHub: React.FC<TournamentHubProps> = ({
           <button
             onClick={() => {
               soundFx.playClick();
-              onUpdateTournament(null);
+              if (window.confirm(`Полностью удалить турнир «${tournament.name || 'без названия'}» и отменить его влияние на VRS и статистику карт?`)) {
+                if (onDeleteTournament) onDeleteTournament(tournament);
+                else onUpdateTournament(null);
+              }
             }}
             className="flex items-center gap-1.5 px-3 py-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 rounded-xl text-xs font-semibold border border-rose-500/30 transition-colors cursor-pointer"
             title="Удалить турнир и вернуться к экрану создания"

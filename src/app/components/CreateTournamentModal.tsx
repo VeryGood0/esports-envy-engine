@@ -250,7 +250,7 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
   const [mode, setMode] = useState<TournamentMode>('swiss_playoffs');
   const [teamCount, setTeamCount] = useState<number>(16);
   const [groupCount, setGroupCount] = useState<number>(2);
-  const [groupStyle, setGroupStyle] = useState<'gsl' | 'round_robin'>('gsl');
+  const [groupStyle, setGroupStyle] = useState<'gsl' | 'gsl_top3' | 'round_robin'>('gsl');
   // Optional manual group assignment; unassigned teams use the default snake draw.
   const [groupAssignments, setGroupAssignments] = useState<Record<string, string>>({});
   const [includeThirdPlace, setIncludeThirdPlace] = useState(true);
@@ -275,13 +275,13 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
   });
 
   const isGroupTournament = mode === 'gsl_groups' || mode === 'groups_playoffs';
-  const usesGslGroups = mode === 'gsl_groups' || (mode === 'groups_playoffs' && groupStyle === 'gsl');
+  const usesGslGroups = mode === 'gsl_groups' || (mode === 'groups_playoffs' && groupStyle !== 'round_robin');
   const teamsPerGroup = selectedTeamIds.length / groupCount;
   const groupSizeLabel = Number.isInteger(teamsPerGroup) ? `по ${teamsPerGroup} команд` : 'неравное число команд';
   const isGroupLayoutValid = !isGroupTournament || (
     selectedTeamIds.length >= groupCount * 2 &&
     selectedTeamIds.length % groupCount === 0 &&
-    (!usesGslGroups || [4, 8].includes(teamsPerGroup))
+    (!usesGslGroups || (groupStyle === 'gsl_top3' ? teamsPerGroup === 4 : [4, 8].includes(teamsPerGroup)))
   );
 
   // Resolve the visible group for every selected team and freeze it before reseeding.
@@ -416,7 +416,8 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
         ...stageFormats,
         groupCount,
         groupStyle,
-        groupAssignments
+        groupAssignments,
+        gslLowerSemiLoserRouting: stageFormats.gslLowerSemiLoserRouting || 'swapped'
       },
       includeThirdPlace
     });
@@ -779,7 +780,7 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
                       Настройки группового формата (Сетки как на фото)
                     </h4>
                     <span className="text-[11px] font-mono text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/30">
-                      {`${groupCount} группы · ${groupSizeLabel} · ${usesGslGroups && teamsPerGroup === 8 ? 3 : 2} в плей-офф из каждой`}
+                      {`${groupCount} группы · ${groupSizeLabel} · ${usesGslGroups && (teamsPerGroup === 8 || groupStyle === 'gsl_top3') ? 3 : 2} в плей-офф из каждой`}
                     </span>
                   </div>
 
@@ -801,7 +802,7 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
                               soundFx.playClick();
                               setGroupCount(gOpt.cnt);
                               setGroupAssignments({});
-                              handleSetTeamCount(gOpt.cnt === 2 ? 16 : gOpt.cnt * 4);
+                              handleSetTeamCount(gOpt.cnt === 2 ? (groupStyle === 'gsl_top3' ? 8 : 16) : gOpt.cnt * 4);
                             }}
                             className={`p-2.5 rounded-xl border text-xs font-bold transition-all cursor-pointer text-left ${
                               groupCount === gOpt.cnt
@@ -821,7 +822,7 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
                       <label className="text-xs text-slate-300 font-mono block mb-1.5 font-bold">
                         Регламент матчей в группах:
                       </label>
-                      <div className="grid grid-cols-2 gap-2 font-mono">
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 font-mono">
                         <button
                           type="button"
                           onClick={() => {
@@ -835,8 +836,28 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
                               : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
                           }`}
                         >
-                          <div className="text-white font-bold">GSL Double Elim</div>
-                          <div className="text-[10px] text-slate-400 font-normal mt-0.5">Сетка виннеров/лузеров (Фото)</div>
+                          <div className="text-white font-bold">GSL · 2 победы / 2 поражения</div>
+                          <div className="text-[10px] text-slate-400 font-normal mt-0.5">2 победы — проход, 2 поражения — вылет. В группах по 4 все матчи Bo3.</div>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            soundFx.playClick();
+                            setGroupStyle('gsl_top3');
+                            setMode('gsl_groups');
+                            setGroupCount(2);
+                            setGroupAssignments({});
+                            handleSetTeamCount(8);
+                          }}
+                          className={`p-3 rounded-xl border text-xs font-bold transition-all cursor-pointer text-left ${
+                            groupStyle === 'gsl_top3'
+                              ? 'bg-amber-500/20 border-amber-500 text-amber-300 shadow-sm ring-1 ring-amber-500/40'
+                              : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
+                          }`}
+                        >
+                          <div className="text-white font-bold">GSL Top 3 · IEM / ESL</div>
+                          <div className="text-[10px] text-slate-400 font-normal mt-0.5">2 группы по 4: 1-е в полуфинал, 2-е и 3-е в четвертьфинал.</div>
                         </button>
 
                         <button
@@ -853,17 +874,42 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
                           }`}
                         >
                           <div className="text-white font-bold">Круговой турнир</div>
-                          <div className="text-[10px] text-slate-400 font-normal mt-0.5">Таблица очков</div>
+                          <div className="text-[10px] text-slate-400 font-normal mt-0.5">Каждая команда играет с каждой.</div>
                         </button>
                       </div>
                     </div>
                   </div>
 
+                  {usesGslGroups && groupStyle === 'gsl' && teamsPerGroup === 8 && (
+                    <div className="rounded-xl border border-slate-800 bg-slate-900/70 p-3 space-y-2">
+                      <div className="text-xs font-bold text-white">Маршрут проигравших в нижнюю сетку</div>
+                      <p className="text-[11px] leading-relaxed text-slate-400">Настройка определяет, в какой Lower semi-final попадут проигравшие в Upper semi-final 1 и 2.</p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <button type="button" onClick={() => setStageFormats({ ...stageFormats, gslLowerSemiLoserRouting: 'swapped' })} className={`rounded-xl border p-3 text-left transition-colors ${stageFormats.gslLowerSemiLoserRouting !== 'same' ? 'border-amber-500 bg-amber-500/10 text-amber-200' : 'border-slate-700 bg-slate-950 text-slate-400'}`}>
+                          <span className="block text-xs font-bold">Перекрёстно (рекомендуется)</span>
+                          <span className="mt-1 block text-[10px]">Проигравший Upper SF 1 → Lower SF 2; Upper SF 2 → Lower SF 1</span>
+                        </button>
+                        <button type="button" onClick={() => setStageFormats({ ...stageFormats, gslLowerSemiLoserRouting: 'same' })} className={`rounded-xl border p-3 text-left transition-colors ${stageFormats.gslLowerSemiLoserRouting === 'same' ? 'border-amber-500 bg-amber-500/10 text-amber-200' : 'border-slate-700 bg-slate-950 text-slate-400'}`}>
+                          <span className="block text-xs font-bold">По тому же номеру</span>
+                          <span className="mt-1 block text-[10px]">Проигравший Upper SF 1 → Lower SF 1; Upper SF 2 → Lower SF 2</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
                   <div className="p-3 rounded-xl bg-slate-900/90 border border-slate-800 text-xs font-mono text-slate-300 flex items-center justify-between">
                     <div>
                       <span className="text-amber-400 font-bold">Схема выхода в плей-офф: </span>
                       <span>
-                        {groupCount === 2 && teamCount >= 16 ? 'Две группы по 8 команд: из каждой выходят 3 команды. Победители групп начинают с полуфинала, 2-е и 3-и места играют четвертьфиналы крест-накрест.' : groupCount === 2 ? 'Две группы по 4 команды: по 2 лучшие команды выходят в полуфиналы.' : `Из ${groupCount} групп выходят по 2 лучшие команды (всего ${groupCount * 2} в плей-офф).`}
+                        {groupStyle === 'gsl_top3'
+                          ? (groupCount === 2
+                            ? 'Две группы по 4 команды: 1-е место из каждой группы напрямую выходит в полуфинал, 2-е и 3-е места играют четвертьфиналы крест-накрест.'
+                            : 'Четыре группы по 4 команды: победители групп проходят в четвертьфиналы, 2-е и 3-и места играют дополнительный раунд за выход в четвертьфинал.')
+                          : groupCount === 2 && teamCount >= 16
+                            ? 'Две группы по 8 команд: из каждой выходят 3 команды. Победители групп начинают с полуфинала, 2-е и 3-и места играют четвертьфиналы крест-накрест.'
+                            : groupCount === 2
+                              ? 'Две группы по 4 команды: по 2 лучшие команды выходят в полуфиналы.'
+                              : `Из ${groupCount} групп выходят по 2 лучшие команды (всего ${groupCount * 2} в плей-офф).`}
                       </span>
                     </div>
                   </div>
@@ -889,14 +935,14 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
                     {!isGroupLayoutValid && (
                       <span className="text-[10px] font-mono text-rose-300 mt-1 block">
                         {usesGslGroups
-                          ? 'Для GSL выбери равные группы по 4 или 8 команд (всего 8 или 16 участников).'
+                          ? (groupStyle === 'gsl_top3' ? 'Для GSL Top 3 нужны группы строго по 4 команды (8 участников для 2 групп или 16 для 4 групп).' : 'Для GSL выбери равные группы по 4 или 8 команд (всего 8 или 16 участников).')
                           : `Количество участников должно делиться на ${groupCount} группы, минимум по 2 команды.`}
                       </span>
                     )}
                   </div>
 
                   <div className="flex items-center gap-1.5 bg-[#090d14] p-1 rounded-xl border border-slate-800">
-                    {((mode === 'gsl_groups' || mode === 'groups_playoffs') ? [8, 16] : [4, 6, 8, 12, 16, 24, 32]).map((cnt) => (
+                    {((mode === 'gsl_groups' || mode === 'groups_playoffs') ? (groupStyle === 'gsl_top3' ? (groupCount === 2 ? [8] : [16]) : (groupCount === 2 ? [8, 16] : [16])) : [4, 6, 8, 12, 16, 24, 32]).map((cnt) => (
                       <button
                         key={cnt}
                         onClick={() => handleSetTeamCount(cnt)}

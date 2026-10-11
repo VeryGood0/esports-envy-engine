@@ -52,6 +52,7 @@ export const PlayoffsStageView: React.FC<PlayoffsStageViewProps> = ({
 }) => {
   const getTeam = (id?: string) => teams.find((t) => t.id === id);
 
+  const r12Matches = matches.filter((m) => m.poolKey.startsWith('r12'));
   const qfMatches = matches.filter((m) => m.poolKey.startsWith('qf'));
   const sfMatches = matches.filter((m) => m.poolKey.startsWith('sf'));
   const finalMatch = matches.find((m) => m.poolKey === 'final');
@@ -389,8 +390,18 @@ export const PlayoffsStageView: React.FC<PlayoffsStageViewProps> = ({
         </div>
 
         {/* Bracket Grid: 3 columns if quarterfinals present, 2 columns if starting from semifinals */}
-        <div className={`min-w-[700px] grid ${qfMatches.length > 0 ? 'grid-cols-3' : 'grid-cols-2 max-w-3xl mx-auto'} gap-8 relative items-center`}>
-          {/* Column 1: Quarter-finals (if any) */}
+        <div className={`min-w-[700px] grid ${r12Matches.length > 0 ? 'grid-cols-4 min-w-[1400px]' : qfMatches.length > 0 ? 'grid-cols-3' : 'grid-cols-2 max-w-3xl mx-auto'} gap-8 relative items-center`}>
+          {/* First round play-in, only in a 12-team group-playoff format. */}
+          {r12Matches.length > 0 && (
+            <div className="space-y-4">
+              <div className="text-xs font-mono font-bold text-slate-400 uppercase tracking-wider mb-2">Раунд за выход в 1/4 финала</div>
+              <div className="space-y-4">
+                {r12Matches.map((m, i) => renderBracketMatch(m, undefined, `Матч ${i + 1}`))}
+              </div>
+            </div>
+          )}
+
+          {/* Column: Quarter-finals (if any) */}
           {qfMatches.length > 0 && (
             <div className="space-y-4">
               <div className="text-xs font-mono font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center justify-between">
