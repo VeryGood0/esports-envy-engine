@@ -33,7 +33,8 @@ import {
   simulateSeriesOnVeto
 } from './utils/mapSimulation';
 
-import { Sliders, Image, Trophy, Swords, GitBranch, SlidersHorizontal } from 'lucide-react';
+import { Sliders, Image, Trophy, Swords, GitBranch, SlidersHorizontal, Settings } from 'lucide-react';
+import { SettingsModal } from './components/SettingsModal';
 import arenaBg from './assets/images/cs2_arena_stage_1791213016355.jpg';
 import { DataManagementModal } from './components/DataManagementModal';
 
@@ -170,6 +171,7 @@ export default function App() {
   const [status, setStatus] = useState<'PENDING' | 'IN_PROGRESS' | 'FINISHED'>('PENDING');
 
   // Option: automatically update team VRS points after game
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [autoUpdatePoints, setAutoUpdatePoints] = useState<boolean>(() => {
     try {
       const saved = localStorage.getItem('cs2_auto_update_points');
@@ -844,6 +846,18 @@ export default function App() {
             <span>Логотипы</span>
           </button>
 
+          <button
+            onClick={() => {
+              soundFx.playClick();
+              setIsSettingsOpen(true);
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-slate-200 hover:text-white bg-slate-800/80 hover:bg-slate-700 border border-slate-700 rounded-xl transition-colors cursor-pointer"
+            title="Настройки симуляции"
+          >
+            <Settings className="w-3.5 h-3.5 text-amber-400" />
+            <span className="hidden sm:inline">Настройки</span>
+          </button>
+
           {/* Data Reset & Management Modal Button */}
           <button
             onClick={() => {
@@ -1043,6 +1057,8 @@ export default function App() {
           }}
         />
       )}
+
+      <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
 
       {/* Comprehensive Data Management & Granular Reset Modal */}
       <DataManagementModal
