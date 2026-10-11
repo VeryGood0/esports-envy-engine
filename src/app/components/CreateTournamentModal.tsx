@@ -837,7 +837,7 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
                           }`}
                         >
                           <div className="text-white font-bold">GSL · 2 победы / 2 поражения</div>
-                          <div className="text-[10px] text-slate-400 font-normal mt-0.5">2 победы — проход, 2 поражения — вылет. В группах по 4 все матчи Bo3.</div>
+                          <div className="text-[10px] text-slate-400 font-normal mt-0.5">Для групп по 4: 4 команды в группе. Winners — 1-е и 2-е места, победитель Elimination — 3-е; Decider удалён. Все матчи BO3.</div>
                         </button>
 
                         <button
@@ -856,8 +856,8 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
                               : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
                           }`}
                         >
-                          <div className="text-white font-bold">GSL Top 3 · IEM / ESL</div>
-                          <div className="text-[10px] text-slate-400 font-normal mt-0.5">2 группы по 4: 1-е в полуфинал, 2-е и 3-е в четвертьфинал.</div>
+                          <div className="text-white font-bold">GSL Top 3 · группы по 4</div>
+                          <div className="text-[10px] text-slate-400 font-normal mt-0.5">2 группы по 4 команды: верхний финал определяет 1-е/2-е место, нижний — 3-е.</div>
                         </button>
 
                         <button
@@ -945,14 +945,21 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
                     {((mode === 'gsl_groups' || mode === 'groups_playoffs') ? (groupStyle === 'gsl_top3' ? (groupCount === 2 ? [8] : [16]) : (groupCount === 2 ? [8, 16] : [16])) : [4, 6, 8, 12, 16, 24, 32]).map((cnt) => (
                       <button
                         key={cnt}
+                        disabled={(mode === 'gsl_groups' || mode === 'groups_playoffs') && (
+                          groupStyle === 'gsl_top3'
+                            ? cnt !== groupCount * 4
+                            : groupStyle === 'gsl'
+                              ? ![4, 8].includes(cnt / groupCount)
+                              : cnt % groupCount !== 0
+                        )}
                         onClick={() => handleSetTeamCount(cnt)}
-                        className={`px-2.5 py-1 text-xs font-mono font-bold rounded-lg transition-colors cursor-pointer ${
+                        className={`px-2.5 py-1 text-xs font-mono font-bold rounded-lg transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed ${
                           teamCount === cnt
                             ? 'bg-amber-500 text-black shadow-xs'
                             : 'text-slate-400 hover:text-white'
                         }`}
                       >
-                        {cnt}
+                        {cnt} ({groupCount > 0 ? cnt / groupCount : cnt} в группе)
                       </button>
                     ))}
                   </div>

@@ -1892,8 +1892,9 @@ export function createCustomTournament(params: CreateTournamentParams): Tourname
           const m2: TournamentMatch = { id: `${tourId}_gsl_${gLetter}_m2`, stage: 'groups', poolKey: `gsl_${gLetter}_opening2`, roundNumber: 1, groupLetter: gLetter, name: `${gName} · Открывающий матч 2`, teamAId: groupTeams[1]?.id, teamBId: groupTeams[2]?.id, scoreA: 0, scoreB: 0, format: fmt, status: 'ready' };
           const winners: TournamentMatch = { id: `${tourId}_gsl_${gLetter}_winners`, stage: 'groups', poolKey: `gsl_${gLetter}_winners`, roundNumber: 2, groupLetter: gLetter, name: `${gName} · Матч победителей`, scoreA: 0, scoreB: 0, format: fmt, status: 'scheduled' };
           const elim: TournamentMatch = { id: `${tourId}_gsl_${gLetter}_elim`, stage: 'groups', poolKey: `gsl_${gLetter}_elim`, roundNumber: 2, groupLetter: gLetter, name: `${gName} · Матч на вылет`, scoreA: 0, scoreB: 0, format: fmt, status: 'scheduled' };
-          const decider: TournamentMatch = { id: `${tourId}_gsl_${gLetter}_decider`, stage: 'groups', poolKey: `gsl_${gLetter}_decider`, roundNumber: 3, groupLetter: gLetter, name: `${gName} · Решающий матч`, scoreA: 0, scoreB: 0, format: fmt, status: 'scheduled' };
-          gMatches.push(m1, m2, winners, elim, decider);
+          // No Decider: the Winners match winner is 1st, its loser is 2nd;
+          // the Elimination match winner earns the 3rd playoff spot.
+          gMatches.push(m1, m2, winners, elim);
         }
       } else {
         // Standard Round Robin inside group
@@ -1937,7 +1938,7 @@ export function createCustomTournament(params: CreateTournamentParams): Tourname
 
     let playoffMatches: TournamentMatch[] = [];
 
-    if (groupCount === 2 && (teamCount >= 16 || isTop3Gsl)) {
+    if (groupCount === 2 && (teamCount >= 16 || isTop3Gsl || configuredGroupStyle === 'gsl')) {
       // Six-team playoffs: group winners receive byes to the semifinals.
       playoffMatches = [
         { id: 'playoff_qf1', stage: 'playoffs', poolKey: 'qf1', roundNumber: 1, name: 'Четвертьфинал 1 (2-е место A vs 3-е место B)', scoreA: 0, scoreB: 0, format: qfFmt, status: 'scheduled' },
@@ -2100,7 +2101,7 @@ export function updateGroupMatchResult(
     const m2 = group.matches.find((m) => m.poolKey === `gsl_${gLetter}_opening2`);
     const winners = group.matches.find((m) => m.poolKey === `gsl_${gLetter}_winners`);
     const elim = group.matches.find((m) => m.poolKey === `gsl_${gLetter}_elim`);
-    const decider = group.matches.find((m) => m.poolKey === `gsl_${gLetter}_decider`);
+    const decider = group.matches.find((m) => m.poolKey === `gsl_${gLetter}_decider`); // legacy tournaments only
 
     // 1. If Opening matches finished, populate Winners and Elimination
     if (m1?.status === 'finished' && m2?.status === 'finished') {
@@ -2116,24 +2117,21 @@ export function updateGroupMatchResult(
       }
     }
 
-    // 2. If Winners match finished -> Winner is #1 seed qualified! Loser goes to Decider (slot A)
-    if (winners?.status === 'finished') {
-      if (decider) {
-        decider.teamAId = winners.loserId;
-        if (decider.teamAId && decider.teamBId && decider.status === 'scheduled') {
-          decider.status = 'ready';
-        }
-      }
-    }
-
-    // 3. If Elimination match finished -> Loser is eliminated! Winner goes to Decider (slot B)
-    if (elim?.status === 'finished') {
-      if (decider) {
-        decider.teamBId = elim.winnerId;
-        if (decider.teamAId && decider.teamBId && decider.status === 'scheduled') {
-          decider.status = 'ready';
-        }
-      }
+    // Winners-match winner qualifies as 1st; its loser also qualifies as 2nd.
+    // Elimination-match winner qualifies as 3rd. There is no Decider in new brackets.
+    if (winners?.status === 'finished' && elim?.status === 'finished') {
+      group.qualifiedTeamIds = [winners.winnerId, winners.loserId, elim.winnerId].filter(Boolean) as string[];
+      group.eliminatedTeamIds = [elim.loserId].filter(Boolean) as string[];
+    } else if (decider) {
+      // Keep existing saved tournaments using the legacy Decider match compatible.
+      if (winners?.status === 'finished') decider.teamAId = winners.loserId;
+      if (elim?.status === 'finished') decider.teamBId = elim.winnerId;
+      if (decider.teamAId && decider.teamBId && decider.status === 'scheduled') decider.status = 'ready';
+      const qualified: string[] = [];
+      if (winners?.status === 'finished' && winners.winnerId) qualified.push(winners.winnerId);
+      if (decider.status === 'finished' && decider.winnerId) qualified.push(decider.winnerId);
+      group.qualifiedTeamIds = qualified;
+      group.eliminatedTeamIds = [elim?.loserId, decider.status === 'finished' ? decider.loserId : undefined].filter(Boolean) as string[];
     }
 
     // Update group qualifiers. Eight-team groups send the upper-final winner,
@@ -2182,7 +2180,7 @@ export function updateGroupMatchResult(
   const groupsList = currentTour.groups || [];
   const allGroupsFinished =
     groupsList.length > 0 &&
-    groupsList.every((g) => g.qualifiedTeamIds && g.qualifiedTeamIds.length >= ((g.groupStyle === 'gsl_top3' || g.teamIds.length >= 8) ? 3 : 2));
+    groupsList.every((g) => g.qualifiedTeamIds && g.qualifiedTeamIds.length >= ((g.groupStyle === 'gsl_top3' || g.groupStyle === 'gsl' || g.teamIds.length >= 8) ? 3 : 2));
 
   if (allGroupsFinished) {
     // Populate playoff bracket with group qualifiers!
