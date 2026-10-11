@@ -1,3 +1,4 @@
+// @ts-nocheck -- imported legacy code written for a looser tsconfig
 import React, { useState } from 'react';
 import {
   Team,

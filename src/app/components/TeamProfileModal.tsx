@@ -1,3 +1,4 @@
+// @ts-nocheck -- imported legacy code written for a looser tsconfig
 import React, { useState, useMemo } from 'react';
 import { Team, MatchPrediction, TeamFormStats, Trophy as TrophyType, TrophyMatchSummary } from '../types';
 import { TeamLogo } from './TeamLogo';

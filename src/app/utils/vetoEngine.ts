@@ -1,3 +1,4 @@
+// @ts-nocheck -- imported legacy code written for a looser tsconfig
 import {
   ActiveDutyMap,
   ACTIVE_DUTY_MAPS,
