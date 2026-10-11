@@ -204,6 +204,12 @@ export interface TournamentMatch {
   deltaFormB?: number;
   mapsPlayed?: MatchSeriesMapResult[];
   vetoState?: VetoState;
+  sourceA?: string;
+  sourceAResult?: 'winner' | 'loser';
+  sourceB?: string;
+  sourceBResult?: 'winner' | 'loser';
+  directSeedA?: boolean;
+  directSeedB?: boolean;
 }
 
 export interface SwissTeamRecord {
@@ -232,7 +238,7 @@ export interface TournamentGroup {
   letter?: string; // 'A', 'B', 'C', 'D'
   teamIds: string[];
   matches: TournamentMatch[];
-  qualifiedTeamIds?: string[]; // 1st & 2nd seed advancing to playoffs
+  qualifiedTeamIds?: string[]; // ordered group qualifiers advancing to playoffs
   eliminatedTeamIds?: string[];
 }
 
@@ -248,7 +254,7 @@ export interface RoundRobinTableRow {
 export interface StageFormatSettings {
   groupStageFormat?: MatchFormat;
   groupFormat?: MatchFormat;
-  groupCount?: number; // 2 or 4 groups
+  groupCount?: number; // number of groups
   groupStyle?: 'gsl' | 'round_robin';
   swissNormalFormat?: MatchFormat;
   swissDeciderFormat?: MatchFormat;
@@ -269,7 +275,7 @@ export interface TournamentState {
   tier?: TournamentTier;
   championVrsBonus?: number;
   teamCount?: number;
-  groupCount?: number; // 2 or 4 groups
+  groupCount?: number; // number of groups
   groupStyle?: 'gsl' | 'round_robin';
   groupAdvancementCount?: number; // default 2
   participatingTeamIds?: string[];

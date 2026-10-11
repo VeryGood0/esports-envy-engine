@@ -249,8 +249,10 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
   // Format Settings
   const [mode, setMode] = useState<TournamentMode>('swiss_playoffs');
   const [teamCount, setTeamCount] = useState<number>(16);
-  const [groupCount, setGroupCount] = useState<number>(2); // 2 or 4 groups
+  const [groupCount, setGroupCount] = useState<number>(2);
   const [groupStyle, setGroupStyle] = useState<'gsl' | 'round_robin'>('gsl');
+  // Optional manual group assignment; unassigned teams use the default snake draw.
+  const [groupAssignments, setGroupAssignments] = useState<Record<string, string>>({});
   const [includeThirdPlace, setIncludeThirdPlace] = useState(true);
 
   // Stage Formats
@@ -294,7 +296,7 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
     setSelectedTeamIds(defaultSortedTeams.slice(0, needed).map((t) => t.id));
 
     if (preset.mode === 'gsl_groups' || preset.mode === 'groups_playoffs') {
-      setGroupCount(preset.teamCount <= 8 ? 2 : 4);
+      setGroupCount(preset.teamCount >= 16 ? 2 : 2);
       setGroupStyle(preset.mode === 'gsl_groups' ? 'gsl' : 'round_robin');
     }
   };
@@ -303,9 +305,6 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
   const handleSetTeamCount = (count: number) => {
     soundFx.playClick();
     setTeamCount(count);
-    if (count <= 8) {
-      setGroupCount(2);
-    }
     if (selectedTeamIds.length > count) {
       setSelectedTeamIds(selectedTeamIds.slice(0, count));
     } else if (selectedTeamIds.length < count) {
@@ -383,7 +382,8 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
       stageFormats: {
         ...stageFormats,
         groupCount,
-        groupStyle
+        groupStyle,
+        groupAssignments
       },
       includeThirdPlace
     });
@@ -754,14 +754,12 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
                     {/* Number of groups */}
                     <div>
                       <label className="text-xs text-slate-300 font-mono block mb-1.5 font-bold">
-                        Количество групп (по 4 команды в каждой):
+                        Количество групп и участников:
                       </label>
                       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 font-mono">
                         {[
-                          { cnt: 2, label: '2 Группы', desc: '8 команд (A, B)' },
-                          { cnt: 3, label: '3 Группы', desc: '12 команд (A..C)' },
-                          { cnt: 4, label: '4 Группы', desc: '16 команд (A..D)' },
-                          { cnt: 6, label: '6 Групп', desc: '24 команды' }
+                          { cnt: 2, label: '2 Группы', desc: '16 команд · по 8' },
+                          { cnt: 4, label: '4 Группы', desc: '16 команд · по 4' }
                         ].map((gOpt) => (
                           <button
                             key={gOpt.cnt}
@@ -769,7 +767,7 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
                             onClick={() => {
                               soundFx.playClick();
                               setGroupCount(gOpt.cnt);
-                              handleSetTeamCount(gOpt.cnt * 4);
+                              handleSetTeamCount(gOpt.cnt === 2 ? 16 : gOpt.cnt * 4);
                             }}
                             className={`p-2.5 rounded-xl border text-xs font-bold transition-all cursor-pointer text-left ${
                               groupCount === gOpt.cnt
@@ -831,9 +829,7 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
                     <div>
                       <span className="text-amber-400 font-bold">Схема выхода в плей-офф: </span>
                       <span>
-                        {groupCount === 2
-                          ? 'Из 2 групп (A и B) выходят по 2 команды (всего 4 в плей-офф). В плей-офф (Полуфиналы): 1-е место группы A vs 2-е место группы B, 1-е место группы B vs 2-е место группы A → Гранд-финал!'
-                          : `Из ${groupCount} групп выходят по 2 сильнейшие команды (всего ${groupCount * 2} в плей-офф) и автоматически формируют олимпийскую сетку на выбывание с гранд-финалом.`}
+                        {groupCount === 2 && teamCount >= 16 ? 'Две группы по 8 команд: из каждой выходят 3 команды. Победители групп начинают с полуфинала, 2-е и 3-и места играют четвертьфиналы крест-накрест.' : groupCount === 2 ? 'Две группы по 4 команды: по 2 лучшие команды выходят в полуфиналы.' : `Из ${groupCount} групп выходят по 2 лучшие команды (всего ${groupCount * 2} в плей-офф).`}
                       </span>
                     </div>
                   </div>
@@ -859,7 +855,7 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
                   </div>
 
                   <div className="flex items-center gap-1.5 bg-[#090d14] p-1 rounded-xl border border-slate-800">
-                    {[4, 6, 8, 12, 16, 24, 32].map((cnt) => (
+                    {((mode === 'gsl_groups' || mode === 'groups_playoffs') ? [8, 16] : [4, 6, 8, 12, 16, 24, 32]).map((cnt) => (
                       <button
                         key={cnt}
                         onClick={() => handleSetTeamCount(cnt)}
@@ -939,6 +935,24 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
                           </span>
                         </div>
 
+                        {(mode === 'groups_playoffs' || mode === 'gsl_groups') && (
+                          <select
+                            aria-label={`Группа для команды ${team.name}`}
+                            value={(groupAssignments[id] && 'ABCDEFGH'.slice(0, groupCount).includes(groupAssignments[id])) ? groupAssignments[id] : (() => {
+                              const groupLetters = 'ABCDEFGH'.split('');
+                              const round = Math.floor(idx / groupCount);
+                              const pos = round % 2 === 0 ? idx % groupCount : groupCount - 1 - (idx % groupCount);
+                              return groupLetters[pos] || 'A';
+                            })()}
+                            onChange={(e) => setGroupAssignments((prev) => ({ ...prev, [id]: e.target.value }))}
+                            className="max-w-[76px] rounded-lg border border-amber-500/30 bg-slate-950 px-1.5 py-1 text-[10px] text-amber-300"
+                            title="Назначить команду в группу"
+                          >
+                            {'ABCDEFGH'.slice(0, groupCount).split('').map((letter) => (
+                              <option key={letter} value={letter}>Группа {letter}</option>
+                            ))}
+                          </select>
+                        )}
                         <div className="flex items-center gap-0.5 shrink-0">
                           <button
                             disabled={idx === 0}

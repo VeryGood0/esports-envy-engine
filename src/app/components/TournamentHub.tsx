@@ -784,8 +784,13 @@ export const TournamentHub: React.FC<TournamentHubProps> = ({
         return m;
       });
 
+      const enrichedGroups = (updatedTournament.groups || []).map((group) => ({
+        ...group,
+        matches: (group.matches || []).map((m) => enrichedGroupMatches.find((updated) => updated.id === m.id) || m)
+      }));
       const nextTour: TournamentState = {
         ...updatedTournament,
+        groups: enrichedGroups,
         groupMatches: enrichedGroupMatches
       };
 
