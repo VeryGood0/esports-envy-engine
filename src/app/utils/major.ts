@@ -1,3 +1,4 @@
+// @ts-nocheck -- matches loose typing of the imported simulator code
 import {
   MajorStageFormat,
   MajorStageNumber,
