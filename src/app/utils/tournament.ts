@@ -14,6 +14,7 @@ import {
   StageFormatSettings
 } from '../types';
 import { calculatePointsStakes, calculateMatchFormDeltas } from './probability';
+import { buildMajorSwissStage, DEFAULT_MAJOR_STAGE_FORMATS, getAllSwissMatches, startNextMajorStage, stageFormatsForMajorStage } from './major';
 
 /**
  * Whether this tournament uses two GSL groups with eight teams each.
@@ -648,6 +649,11 @@ export function advanceSwissRound(
   const qualifiedTeams = Object.values(updatedRecords).filter((r) => r.status === 'qualified');
 
   if (nextRoundNumber > 5 || qualifiedTeams.length === 8) {
+    // CS2 Major: Stage 1 / Stage 2 qualifiers move on to the next Swiss stage instead of playoffs.
+    if (currentState.isMajor && (currentState.majorStage || 1) < 3) {
+      const nextStageTour = startNextMajorStage(currentState, updatedMatches, updatedRecords);
+      if (nextStageTour) return nextStageTour;
+    }
     // Swiss is done! Populate Playoffs bracket according to official seeding!
     const seededPlayoffMatches = seedPlayoffsFromSwiss(
       playoffMatches,
@@ -1344,7 +1350,7 @@ export function extractTeamTournamentMatches(
   // Latest matches (Grand Final = 1000) at index 0 down to round 1 (300)!
   const allFinished = [
     ...(tournament.playoffMatches || []),
-    ...(tournament.swissMatches || []),
+    ...getAllSwissMatches(tournament),
     ...(tournament.groupMatches || []),
     ...(tournament.roundRobinMatches || [])
   ]
@@ -1398,12 +1404,18 @@ export interface CreateTournamentParams {
   teams: Team[]; // in seeded order (index 0 = Seed 1)
   stageFormats?: StageFormatSettings;
   includeThirdPlace?: boolean;
+  /** Major only: which teams start in which stage (ids in seed order). */
+  majorStageTeamIds?: Record<'stage1' | 'stage2' | 'stage3', string[]>;
+  majorStageFormats?: TournamentState['majorStageFormats'];
 }
 
 /**
  * Creates a fully customized tournament state based on user parameters, format, and seeding.
  */
 export function createCustomTournament(params: CreateTournamentParams): TournamentState {
+  if (params.mode === 'major') {
+    return createMajorTournament(params);
+  }
   const {
     name,
     shortName = name.slice(0, 6).toUpperCase(),
@@ -2385,3 +2397,64 @@ export function updateGroupMatchResult(
   return { updatedTournament: currentTour, isGroupsCompleted: false };
 }
 
+
+
+/**
+ * CS2 Major: Stage 1 (16 teams) → Stage 2 (8 invited + 8 from Stage 1)
+ * → Stage 3 (8 invited + 8 from Stage 2) → 8-team single-elimination playoffs.
+ */
+export function createMajorTournament(params: CreateTournamentParams): TournamentState {
+  const tourId = `tour_${Date.now()}`;
+  const seeded = params.teams;
+  const split = params.majorStageTeamIds || {
+    stage1: seeded.slice(16, 32).map((t) => t.id),
+    stage2: seeded.slice(8, 16).map((t) => t.id),
+    stage3: seeded.slice(0, 8).map((t) => t.id)
+  };
+  const formats = { ...DEFAULT_MAJOR_STAGE_FORMATS, ...(params.majorStageFormats || {}) };
+  const includeThirdPlace = params.includeThirdPlace ?? false;
+  const stage1 = buildMajorSwissStage(1, split.stage1, formats.stage1, tourId);
+  const teamSeeds: Record<string, number> = {};
+  seeded.forEach((t, idx) => { teamSeeds[t.id] = idx + 1; });
+
+  const tour: TournamentState = {
+    id: tourId,
+    name: params.name,
+    shortName: params.shortName || params.name.slice(0, 6).toUpperCase(),
+    organizer: params.organizer || 'Valve',
+    prizePool: params.prizePool || '$1,250,000',
+    startDate: params.startDate || new Date().toISOString().split('T')[0],
+    description: params.description || '',
+    tier: 'Major',
+    mode: 'swiss_playoffs',
+    isMajor: true,
+    majorStage: 1,
+    majorStageTeamIds: split,
+    majorStageFormats: formats,
+    majorHistory: [],
+    teamCount: seeded.length,
+    participatingTeamIds: seeded.map((t) => t.id),
+    teamSeeds,
+    stageFormats: { ...(params.stageFormats || {}) },
+    includeThirdPlace,
+    linkPlayoffsToSwiss: true,
+    currentStage: 'swiss',
+    swissRound: 1,
+    swissMatches: stage1.swissMatches,
+    swissRecords: stage1.swissRecords,
+    playoffMatches: applyPlayoffFormats(createEmptyPlayoffBracket(includeThirdPlace), params.stageFormats)
+  };
+  tour.stageFormats = stageFormatsForMajorStage(tour, 1);
+  return tour;
+}
+
+function applyPlayoffFormats(matches: TournamentMatch[], f?: StageFormatSettings): TournamentMatch[] {
+  if (!f) return matches;
+  return matches.map((m) => {
+    const pk = (m.poolKey || '').toLowerCase();
+    if (pk.startsWith('qf') && f.quarterfinalFormat) return { ...m, format: f.quarterfinalFormat };
+    if (pk.startsWith('sf') && f.semifinalFormat) return { ...m, format: f.semifinalFormat };
+    if ((isGrandFinalMatch(m) || isThirdPlaceMatch(m)) && f.finalFormat) return { ...m, format: f.finalFormat };
+    return m;
+  });
+}
