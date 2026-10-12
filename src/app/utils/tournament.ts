@@ -668,7 +668,9 @@ export function advanceSwissRound(
       swissRound: 5,
       swissRecords: updatedRecords,
       swissMatches: updatedMatches,
-      playoffMatches: seededPlayoffMatches
+      playoffMatches: currentState.isMajor
+        ? applyPlayoffFormats(seededPlayoffMatches, currentState.stageFormats)
+        : seededPlayoffMatches
     };
   }
 
