@@ -188,7 +188,22 @@ export type TournamentMode =
   | 'swiss_system'
   | 'round_robin'
   | 'groups_playoffs'
-  | 'gsl_groups';
+  | 'gsl_groups'
+  /** UI-only pick in the create modal; created majors are stored as swiss_playoffs + isMajor. */
+  | 'major';
+
+export type MajorStageNumber = 1 | 2 | 3;
+
+export interface MajorStageFormat {
+  normalFormat: MatchFormat; // opening / mid-table matches
+  deciderFormat: MatchFormat; // advancement & elimination matches (2:x / x:2)
+}
+
+export interface MajorStageArchive {
+  stage: MajorStageNumber;
+  swissMatches: TournamentMatch[];
+  swissRecords: Record<string, SwissTeamRecord>;
+}
 
 export interface TournamentMatch {
   id: string;
@@ -306,6 +321,12 @@ export interface TournamentState {
   roundRobinMatches?: TournamentMatch[];
   roundRobinTable?: RoundRobinTableRow[];
   standings?: TournamentFinalStanding[];
+  /** CS2 Major: Stage 1 -> Stage 2 -> Stage 3 (all Swiss, 16 teams) -> Playoffs. */
+  isMajor?: boolean;
+  majorStage?: MajorStageNumber;
+  majorStageTeamIds?: Record<'stage1' | 'stage2' | 'stage3', string[]>;
+  majorStageFormats?: Record<'stage1' | 'stage2' | 'stage3', MajorStageFormat>;
+  majorHistory?: MajorStageArchive[];
 }
 
 // MAP VETO & SERIES SIMULATION TYPES
