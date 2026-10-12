@@ -28,6 +28,7 @@ interface SwissStageViewProps {
   onOpenPairsEditor?: () => void;
   onAdvanceToPlayoffs?: () => void;
   onToggleMatchFormat?: (matchId: string) => void;
+  nextStageName?: string;
 }
 
 export const SwissStageView: React.FC<SwissStageViewProps> = ({
@@ -42,7 +43,8 @@ export const SwissStageView: React.FC<SwissStageViewProps> = ({
   onResetDefaultPairs,
   onOpenPairsEditor,
   onAdvanceToPlayoffs,
-  onToggleMatchFormat
+  onToggleMatchFormat,
+  nextStageName = 'плей-офф'
 }) => {
   const getTeam = (id?: string) => teams.find((t) => t.id === id);
 
@@ -377,10 +379,10 @@ export const SwissStageView: React.FC<SwissStageViewProps> = ({
             <Trophy className="w-6 h-6 text-amber-400 shrink-0" />
             <div>
               <div className="text-sm font-bold text-white">
-                Швейцарская система завершена! Все 8 команд квалифицировались в плей-офф
+                Швейцарская система завершена! 8 команд прошли в {nextStageName}
               </div>
               <div className="text-xs font-mono text-slate-300 mt-0.5">
-                Пары сформированы по официальным правилам CS2 Major (3:0 vs 3:2, 3:1 vs 3:1).
+                Пары сформированы по счёту команд в швейцарской системе, без повторных встреч в рамках этой стадии.
               </div>
             </div>
           </div>
@@ -390,7 +392,7 @@ export const SwissStageView: React.FC<SwissStageViewProps> = ({
               onClick={onAdvanceToPlayoffs}
               className="flex items-center gap-1.5 px-4 py-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-black font-extrabold text-xs uppercase tracking-wider rounded-xl transition-all shadow-md active:scale-95 cursor-pointer shrink-0"
             >
-              <span>Сетка плей-офф</span>
+              <span>Перейти дальше: {nextStageName}</span>
               <ChevronRight className="w-4 h-4" />
             </button>
           )}

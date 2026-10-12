@@ -189,21 +189,7 @@ export type TournamentMode =
   | 'round_robin'
   | 'groups_playoffs'
   | 'gsl_groups'
-  /** UI-only pick in the create modal; created majors are stored as swiss_playoffs + isMajor. */
   | 'major';
-
-export type MajorStageNumber = 1 | 2 | 3;
-
-export interface MajorStageFormat {
-  normalFormat: MatchFormat; // opening / mid-table matches
-  deciderFormat: MatchFormat; // advancement & elimination matches (2:x / x:2)
-}
-
-export interface MajorStageArchive {
-  stage: MajorStageNumber;
-  swissMatches: TournamentMatch[];
-  swissRecords: Record<string, SwissTeamRecord>;
-}
 
 export interface TournamentMatch {
   id: string;
@@ -287,6 +273,28 @@ export interface StageFormatSettings {
   quarterfinalFormat?: MatchFormat;
   semifinalFormat?: MatchFormat;
   finalFormat?: MatchFormat;
+  /** Per-stage CS Major Swiss match formats. Normal matches include opening and non-qualification rounds. */
+  majorStage1NormalFormat?: MatchFormat;
+  majorStage1DeciderFormat?: MatchFormat;
+  majorStage2NormalFormat?: MatchFormat;
+  majorStage2DeciderFormat?: MatchFormat;
+  majorStage3NormalFormat?: MatchFormat;
+  majorStage3DeciderFormat?: MatchFormat;
+}
+
+
+export interface MajorSwissStageState {
+  stageNumber: 1 | 2 | 3;
+  name: string;
+  /** Teams initially assigned directly to this stage at tournament creation. */
+  directTeamIds: string[];
+  /** All participants in this stage once it becomes active (direct seeds + qualifiers). */
+  teamIds: string[];
+  matches: TournamentMatch[];
+  records: Record<string, SwissTeamRecord>;
+  currentRound: number;
+  status: 'waiting' | 'active' | 'completed';
+  qualifiedTeamIds?: string[];
 }
 
 export interface TournamentState {
@@ -321,12 +329,10 @@ export interface TournamentState {
   roundRobinMatches?: TournamentMatch[];
   roundRobinTable?: RoundRobinTableRow[];
   standings?: TournamentFinalStanding[];
-  /** CS2 Major: Stage 1 -> Stage 2 -> Stage 3 (all Swiss, 16 teams) -> Playoffs. */
-  isMajor?: boolean;
-  majorStage?: MajorStageNumber;
-  majorStageTeamIds?: Record<'stage1' | 'stage2' | 'stage3', string[]>;
-  majorStageFormats?: Record<'stage1' | 'stage2' | 'stage3', MajorStageFormat>;
-  majorHistory?: MajorStageArchive[];
+  /** Active stage number for the four-stage Major format: 1-3 Swiss stages, 4 playoffs. */
+  majorStageNumber?: 1 | 2 | 3 | 4;
+  /** Stage history + direct-entry assignments for the three sequential Major Swiss stages. */
+  majorStages?: MajorSwissStageState[];
 }
 
 // MAP VETO & SERIES SIMULATION TYPES

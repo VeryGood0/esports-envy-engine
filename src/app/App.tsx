@@ -92,7 +92,7 @@ export default function App() {
 
       if (saved) {
         const parsed = JSON.parse(saved);
-        return INITIAL_TEAMS.map((initTeam) => {
+        const baseTeams = INITIAL_TEAMS.map((initTeam) => {
           const found = parsed.find((p: Team) => p.id === initTeam.id);
           if (found) {
             const siteTrophies = filterOnlySiteTrophies(found.trophies);
@@ -107,6 +107,11 @@ export default function App() {
           }
           return initTeam;
         });
+        // Keep user-imported/custom teams while merging in newly added defaults (e.g. 32-team Major support).
+        const userCustomTeams = parsed
+          .filter((p: Team) => p && p.id && !INITIAL_TEAMS.some((initTeam) => initTeam.id === p.id))
+          .map((customTeam: Team) => ({ ...customTeam, mapProfile: customTeam.mapProfile || createZeroMapProfile() }));
+        return [...baseTeams, ...userCustomTeams];
       }
     } catch {
       // Fallback
@@ -1080,7 +1085,7 @@ export default function App() {
             ) : [...archivedTournaments].sort((a, b) => (b.startDate || '').localeCompare(a.startDate || '')).map((tour) => {
               const championId = tour.standings?.find((standing) => standing.place === 1)?.teamId;
               const champion = teams.find((team) => team.id === championId);
-              const completedMatches = [ ...(tour.swissMatches || []), ...(tour.groupMatches || []), ...(tour.playoffMatches || []), ...(tour.roundRobinMatches || []), ...(tour.lowerBracketMatches || []) ];
+              const completedMatches = [ ...(tour.swissMatches || []), ...(tour.groupMatches || []), ...(tour.playoffMatches || []), ...(tour.roundRobinMatches || []), ...(tour.lowerBracketMatches || []), ...((tour.majorStages || []).flatMap((stage) => stage.matches || [])) ];
               const playedCount = new Set(completedMatches.filter((match) => match.status === 'finished').map((match) => match.id)).size;
               return (
                 <article key={tour.id} className="rounded-2xl border border-slate-800 bg-[#0f1420]/90 p-4 sm:p-5">

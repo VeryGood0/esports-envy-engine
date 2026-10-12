@@ -401,7 +401,16 @@ const BASE_TEAMS: Team[] = [
     coach: 'ninro',
     trophiesCount: 0,
     trophies: []
-  }
+  },
+  // Additional default teams let the Major format fill all 32 real team slots.
+  // Logos can be supplied later; TeamLogo renders a monogram until then.
+  { id: 'astralis', name: 'Astralis', shortName: 'AST', points: 1510, defaultPoints: 1510, logoUrl: '', primaryColor: '#ef4444', secondaryColor: '#111827', country: 'DK', region: 'Европа', rosterSnippet: [], trophiesCount: 0, trophies: [] },
+  { id: 'big', name: 'BIG', shortName: 'BIG', points: 1470, defaultPoints: 1470, logoUrl: '', primaryColor: '#60a5fa', secondaryColor: '#172554', country: 'DE', region: 'Европа', rosterSnippet: [], trophiesCount: 0, trophies: [] },
+  { id: 'gamerlegion', name: 'GamerLegion', shortName: 'GL', points: 1440, defaultPoints: 1440, logoUrl: '', primaryColor: '#f97316', secondaryColor: '#431407', country: 'EU', region: 'Европа', rosterSnippet: [], trophiesCount: 0, trophies: [] },
+  { id: '3dmax', name: '3DMAX', shortName: '3DM', points: 1410, defaultPoints: 1410, logoUrl: '', primaryColor: '#a78bfa', secondaryColor: '#2e1065', country: 'FR', region: 'Европа', rosterSnippet: [], trophiesCount: 0, trophies: [] },
+  { id: 'complexity', name: 'Complexity', shortName: 'COL', points: 1380, defaultPoints: 1380, logoUrl: '', primaryColor: '#eab308', secondaryColor: '#422006', country: 'US', region: 'Северная Америка', rosterSnippet: [], trophiesCount: 0, trophies: [] },
+  { id: 'cloud9', name: 'Cloud9', shortName: 'C9', points: 1350, defaultPoints: 1350, logoUrl: '', primaryColor: '#38bdf8', secondaryColor: '#082f49', country: 'US', region: 'Северная Америка', rosterSnippet: [], trophiesCount: 0, trophies: [] },
+  { id: 'ence', name: 'ENCE', shortName: 'ENCE', points: 1320, defaultPoints: 1320, logoUrl: '', primaryColor: '#f8fafc', secondaryColor: '#0f172a', country: 'FI', region: 'Европа', rosterSnippet: [], trophiesCount: 0, trophies: [] }
 ];
 
 export const INITIAL_TEAMS: Team[] = BASE_TEAMS.map((team) => ({

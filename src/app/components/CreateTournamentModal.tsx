@@ -134,10 +134,16 @@ const TOURNAMENT_PRESETS: TournamentPreset[] = [
     organizer: 'PGL / Valve',
     prizePool: '$1,250,000',
     tier: 'Major',
-    description: 'Официальный Чемпионат Мира по Counter-Strike 2. Престижнейший турнир с полным циклом швейцарки и плей-офф на арене.',
-    mode: 'swiss_playoffs',
-    teamCount: 16,
+    description: 'Valve Major на 32 команды: 16 начинают Stage 1, по 8 команд получают прямой слот в Stage 2 и Stage 3. Из каждой швейцарки проходят 8, затем плей-офф Top 8.',
+    mode: 'major',
+    teamCount: 32,
     stageFormats: {
+      majorStage1NormalFormat: 'BO1',
+      majorStage1DeciderFormat: 'BO3',
+      majorStage2NormalFormat: 'BO1',
+      majorStage2DeciderFormat: 'BO3',
+      majorStage3NormalFormat: 'BO3',
+      majorStage3DeciderFormat: 'BO3',
       swissNormalFormat: 'BO1',
       swissDeciderFormat: 'BO3',
       quarterfinalFormat: 'BO3',
@@ -273,6 +279,46 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
   const [selectedTeamIds, setSelectedTeamIds] = useState<string[]>(() => {
     return defaultSortedTeams.slice(0, 16).map((t) => t.id);
   });
+  const [majorStageAssignments, setMajorStageAssignments] = useState<Record<string, 1 | 2 | 3>>({});
+
+  const getDefaultMajorStageAssignments = (teamIds: string[]): Record<string, 1 | 2 | 3> =>
+    Object.fromEntries(teamIds.map((teamId, index) => [teamId, index < 16 ? 1 : index < 24 ? 2 : 3]));
+
+  const getEffectiveMajorStageAssignments = (
+    teamIds: string[],
+    assignments: Record<string, 1 | 2 | 3>
+  ): Record<string, 1 | 2 | 3> => {
+    const capacities = { 1: 16, 2: 8, 3: 8 } as const;
+    const counts = { 1: 0, 2: 0, 3: 0 };
+    const resolved: Record<string, 1 | 2 | 3> = {};
+    teamIds.forEach((teamId) => {
+      const stage = assignments[teamId];
+      if (stage && counts[stage] < capacities[stage]) {
+        resolved[teamId] = stage;
+        counts[stage] += 1;
+      }
+    });
+    teamIds.forEach((teamId, index) => {
+      if (resolved[teamId]) return;
+      const preferred: 1 | 2 | 3 = index < 16 ? 1 : index < 24 ? 2 : 3;
+      const target = counts[preferred] < capacities[preferred]
+        ? preferred
+        : ([1, 2, 3] as const).find((stage) => counts[stage] < capacities[stage]) || 3;
+      resolved[teamId] = target;
+      counts[target] += 1;
+    });
+    return resolved;
+  };
+
+  const effectiveMajorStageAssignments = getEffectiveMajorStageAssignments(selectedTeamIds, majorStageAssignments);
+  const majorStageCounts = {
+    1: selectedTeamIds.filter((id) => effectiveMajorStageAssignments[id] === 1).length,
+    2: selectedTeamIds.filter((id) => effectiveMajorStageAssignments[id] === 2).length,
+    3: selectedTeamIds.filter((id) => effectiveMajorStageAssignments[id] === 3).length
+  };
+  const isMajorAllocationValid = mode !== 'major' || (
+    selectedTeamIds.length === 32 && majorStageCounts[1] === 16 && majorStageCounts[2] === 8 && majorStageCounts[3] === 8
+  );
 
   const isGroupTournament = mode === 'gsl_groups' || mode === 'groups_playoffs';
   const usesGslGroups = mode === 'gsl_groups' || (mode === 'groups_playoffs' && groupStyle !== 'round_robin');
@@ -281,7 +327,9 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
   const fixedGslTeamCount = groupStyle === 'gsl_classic_4' ? 8 : groupStyle === 'gsl_double_elim_8' ? 16 : null;
   const thirdPlaceRequired = usesGslGroups && groupCount === 2 && teamsPerGroup === 8 && teamCount === 16
     && (groupStyle === 'gsl_double_elim_8' || groupStyle === 'gsl');
-  const groupTeamCountOptions = !isGroupTournament
+  const groupTeamCountOptions = mode === 'major'
+    ? [32]
+    : !isGroupTournament
     ? [4, 6, 8, 12, 16, 24, 32]
     : groupStyle === 'gsl_classic_4'
       ? [8]
@@ -335,7 +383,10 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
 
     // Pick top teams for this preset
     const needed = preset.teamCount;
-    setSelectedTeamIds(defaultSortedTeams.slice(0, needed).map((t) => t.id));
+    const presetTeamIds = defaultSortedTeams.slice(0, needed).map((t) => t.id);
+    setSelectedTeamIds(presetTeamIds);
+    setMajorStageAssignments(preset.mode === 'major' ? getDefaultMajorStageAssignments(presetTeamIds) : {});
+    if (preset.mode === 'major') setIncludeThirdPlace(false);
 
     if (preset.mode === 'gsl_groups' || preset.mode === 'groups_playoffs') {
       const presetGroups = preset.stageFormats.groupCount || (preset.mode === 'groups_playoffs' && preset.teamCount >= 16 ? 4 : 2);
@@ -347,32 +398,71 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
     }
   };
 
+  // Select the dedicated Major format from the featured format card.
+  // Keep this separate from the ordinary Swiss format so the three-stage flow is obvious.
+  const handleSelectMajorMode = () => {
+    soundFx.playClick();
+    const majorTeamIds = defaultSortedTeams.slice(0, 32).map((team) => team.id);
+    setMode('major');
+    setName((currentName) => currentName.toLowerCase().includes('major') ? currentName : 'Valve CS2 Major Championship 2026');
+    setShortName('MAJOR 2026');
+    setTier('Major');
+    setDescription('32 команд: 16 начинают Stage 1, 8 получают прямой слот в Stage 2 и 8 — в Stage 3. Из каждой швейцарки выходят 8 команд; затем плей-офф Top 8.');
+    setTeamCount(32);
+    setSelectedTeamIds(majorTeamIds);
+    setMajorStageAssignments(getDefaultMajorStageAssignments(majorTeamIds));
+    setGroupAssignments({});
+    setIncludeThirdPlace(false);
+    setStageFormats((previous) => ({
+      ...previous,
+      majorStage1NormalFormat: previous.majorStage1NormalFormat || 'BO1',
+      majorStage1DeciderFormat: previous.majorStage1DeciderFormat || 'BO3',
+      majorStage2NormalFormat: previous.majorStage2NormalFormat || 'BO1',
+      majorStage2DeciderFormat: previous.majorStage2DeciderFormat || 'BO3',
+      majorStage3NormalFormat: previous.majorStage3NormalFormat || 'BO3',
+      majorStage3DeciderFormat: previous.majorStage3DeciderFormat || 'BO3',
+      quarterfinalFormat: previous.quarterfinalFormat || 'BO3',
+      semifinalFormat: previous.semifinalFormat || 'BO3',
+      finalFormat: previous.finalFormat || 'BO5'
+    }));
+  };
+
   // Adjust team count
   const handleSetTeamCount = (count: number, playSound = true) => {
+    // The Major UI itself restricts teamCount to 32. Do not guard using `mode` here:
+    // callers that switch modes update React state asynchronously, so this closure may
+    // still see the previous mode and accidentally block switching away from Major.
     if (playSound) soundFx.playClick();
     setGroupAssignments({});
     setTeamCount(count);
+    let nextTeamIds = selectedTeamIds;
     if (selectedTeamIds.length > count) {
-      setSelectedTeamIds(selectedTeamIds.slice(0, count));
+      nextTeamIds = selectedTeamIds.slice(0, count);
     } else if (selectedTeamIds.length < count) {
       const remaining = defaultSortedTeams
         .filter((t) => !selectedTeamIds.includes(t.id))
         .map((t) => t.id);
-      setSelectedTeamIds([...selectedTeamIds, ...remaining.slice(0, count - selectedTeamIds.length)]);
+      nextTeamIds = [...selectedTeamIds, ...remaining.slice(0, count - selectedTeamIds.length)];
     }
+    setSelectedTeamIds(nextTeamIds);
+    setMajorStageAssignments(mode === 'major' ? getDefaultMajorStageAssignments(nextTeamIds) : {});
   };
 
   // Toggle Team Selection
   const handleToggleTeam = (teamId: string) => {
     soundFx.playClick();
     setGroupAssignments({});
+    let nextTeamIds = selectedTeamIds;
     if (selectedTeamIds.includes(teamId)) {
-      setSelectedTeamIds(selectedTeamIds.filter((id) => id !== teamId));
-    } else {
-      if (selectedTeamIds.length < teamCount) {
-        setSelectedTeamIds([...selectedTeamIds, teamId]);
-      }
+      nextTeamIds = selectedTeamIds.filter((id) => id !== teamId);
+      const nextAssignments = { ...majorStageAssignments };
+      delete nextAssignments[teamId];
+      setMajorStageAssignments(nextAssignments);
+    } else if (selectedTeamIds.length < teamCount) {
+      nextTeamIds = [...selectedTeamIds, teamId];
     }
+    setSelectedTeamIds(nextTeamIds);
+    setMajorStageAssignments((previous) => getEffectiveMajorStageAssignments(nextTeamIds, previous));
   };
 
   // Auto-seed by VRS rating & current form
@@ -413,7 +503,7 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
 
   // Finish and Create Tournament
   const handleCreate = () => {
-    if (selectedTeamIds.length < 2 || !isGroupLayoutValid) return;
+    if (selectedTeamIds.length < 2 || !isGroupLayoutValid || !isMajorAllocationValid) return;
     soundFx.playVictory();
 
     const selectedTeamsInSeedOrder = selectedTeamIds
@@ -437,7 +527,8 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
         groupAssignments,
         gslLowerSemiLoserRouting: stageFormats.gslLowerSemiLoserRouting || 'swapped'
       },
-      includeThirdPlace
+      includeThirdPlace: mode === 'major' ? false : includeThirdPlace,
+      majorStageAssignments: mode === 'major' ? effectiveMajorStageAssignments : undefined
     });
 
     onCreateTournament(newTournament);
@@ -535,19 +626,24 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
                   {TOURNAMENT_PRESETS.map((p) => {
                     const isSelected = name === p.name;
+                    const isMajorPreset = p.id === 'major';
                     return (
                       <div
                         key={p.id}
                         onClick={() => handleApplyPreset(p)}
                         className={`p-3.5 rounded-2xl border transition-all cursor-pointer ${
                           isSelected
-                            ? 'bg-amber-500/10 border-amber-500/60 shadow-md ring-1 ring-amber-500/30'
-                            : 'bg-slate-900/40 border-slate-800/80 hover:border-slate-700 hover:bg-slate-900/80'
+                            ? isMajorPreset
+                              ? 'bg-gradient-to-br from-purple-900/60 to-slate-950 border-purple-400 shadow-md ring-2 ring-purple-500/40'
+                              : 'bg-amber-500/10 border-amber-500/60 shadow-md ring-1 ring-amber-500/30'
+                            : isMajorPreset
+                              ? 'bg-gradient-to-br from-purple-950/50 to-slate-950 border-purple-500/50 hover:border-purple-300 hover:from-purple-900/40'
+                              : 'bg-slate-900/40 border-slate-800/80 hover:border-slate-700 hover:bg-slate-900/80'
                         }`}
                       >
                         <div className="flex items-center justify-between text-xs font-bold mb-1">
-                          <span className="text-white truncate">{p.name}</span>
-                          <span className="font-mono text-[10px] text-amber-400 shrink-0 ml-1">
+                          <span className="text-white truncate">{isMajorPreset ? 'CS2 MAJOR · 3 ШВЕЙЦАРСКИЕ СТАДИИ' : p.name}</span>
+                          <span className={`font-mono text-[10px] shrink-0 ml-1 ${isMajorPreset ? 'text-purple-200' : 'text-amber-400'}`}>
                             {p.teamCount} команд
                           </span>
                         </div>
@@ -715,6 +811,40 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
                   Поддерживаются все основные киберспортивные форматы CS2
                 </span>
               </div>
+
+              <button
+                type="button"
+                onClick={handleSelectMajorMode}
+                aria-pressed={mode === 'major'}
+                className={`mb-4 w-full rounded-2xl border p-4 sm:p-5 text-left transition-all cursor-pointer ${
+                  mode === 'major'
+                    ? 'border-purple-400 bg-gradient-to-r from-purple-900/70 via-purple-950/50 to-slate-950 ring-2 ring-purple-500/50 shadow-lg shadow-purple-950/40'
+                    : 'border-purple-500/50 bg-gradient-to-r from-purple-950/55 via-slate-900/80 to-slate-950 hover:border-purple-300 hover:from-purple-900/60'
+                }`}
+              >
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-start gap-3">
+                    <div className="rounded-xl border border-purple-300/30 bg-purple-400/15 p-2.5 text-purple-200 shrink-0">
+                      <Trophy className="h-6 w-6" />
+                    </div>
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-sm sm:text-base font-extrabold tracking-wide text-white">CS2 MAJOR · 3 ШВЕЙЦАРСКИЕ СТАДИИ → ПЛЕЙ-ОФФ</span>
+                        <span className="rounded-full border border-purple-300/40 bg-purple-400/15 px-2 py-0.5 text-[10px] font-mono font-extrabold text-purple-200">32 КОМАНДЫ</span>
+                      </div>
+                      <p className="mt-1.5 text-xs leading-relaxed text-slate-300">
+                        Отдельный формат Major: Stage 1 — 16 команд; Stage 2 — 8 приглашённых + 8 прошедших; Stage 3 — 8 приглашённых + 8 прошедших; затем плей-офф Top 8.
+                      </p>
+                      <p className="mt-2 text-[11px] font-bold text-purple-200">
+                        BO1 для обычных матчей Stage 1–2 · BO3 для матчей за выход/вылет · BO3 Stage 3 · BO5 гранд-финал. Настройки можно изменить на шаге 4.
+                      </p>
+                    </div>
+                  </div>
+                  <span className={`shrink-0 rounded-xl px-4 py-2 text-xs font-extrabold ${mode === 'major' ? 'bg-purple-300 text-purple-950' : 'bg-purple-400/15 text-purple-100 border border-purple-300/30'}`}>
+                    {mode === 'major' ? '✓ ВЫБРАН MAJOR' : 'ВЫБРАТЬ MAJOR →'}
+                  </span>
+                </div>
+              </button>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {[
@@ -1002,11 +1132,13 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
                     <span className="text-xs font-mono text-slate-400 mt-0.5 block">
                       Выбрано: <span className="text-amber-400 font-bold">{selectedTeamIds.length}</span> из {teamCount} команд
                     </span>
-                    {!isGroupLayoutValid && (
+                    {(!isGroupLayoutValid || !isMajorAllocationValid) && (
                       <span className="text-[10px] font-mono text-rose-300 mt-1 block">
-                        {usesGslGroups
-                          ? (groupStyle === 'gsl_top3' ? 'Для GSL Top 3 нужны группы строго по 4 команды (8 участников для 2 групп или 16 для 4 групп).' : groupStyle === 'gsl_classic_4' ? 'GSL Classic рассчитан строго на 8 участников: 2 группы по 4 команды.' : groupStyle === 'gsl_double_elim_8' ? 'GSL Double Elimination рассчитан строго на 16 участников: 2 группы по 8 команд.' : 'Для GSL выбери равные группы по 4 или 8 команд (всего 8 или 16 участников).')
-                          : `Количество участников должно делиться на ${groupCount} группы, минимум по 2 команды.`}
+                        {mode === 'major'
+                          ? 'Для Major нужно ровно 32 участника: 16 в Stage 1, 8 напрямую в Stage 2 и 8 напрямую в Stage 3.'
+                          : usesGslGroups
+                            ? (groupStyle === 'gsl_top3' ? 'Для GSL Top 3 нужны группы строго по 4 команды (8 участников для 2 групп или 16 для 4 групп).' : groupStyle === 'gsl_classic_4' ? 'GSL Classic рассчитан строго на 8 участников: 2 группы по 4 команды.' : groupStyle === 'gsl_double_elim_8' ? 'GSL Double Elimination рассчитан строго на 16 участников: 2 группы по 8 команд.' : 'Для GSL выбери равные группы по 4 или 8 команд (всего 8 или 16 участников).')
+                            : `Количество участников должно делиться на ${groupCount} группы, минимум по 2 команды.`}
                       </span>
                     )}
                   </div>
@@ -1121,6 +1253,33 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
                             ))}
                           </select>
                         )}
+                        {mode === 'major' && (
+                          <select
+                            aria-label={`Этап Major для команды ${team.name}`}
+                            value={effectiveMajorStageAssignments[id]}
+                            onChange={(e) => {
+                              const targetStage = Number(e.target.value) as 1 | 2 | 3;
+                              const current = effectiveMajorStageAssignments;
+                              const sourceStage = current[id];
+                              if (sourceStage === targetStage) return;
+                              const caps = { 1: 16, 2: 8, 3: 8 } as const;
+                              const targetMembers = selectedTeamIds.filter((teamId) => current[teamId] === targetStage && teamId !== id);
+                              const targetIsFull = targetMembers.length >= caps[targetStage];
+                              const swappedId = targetIsFull ? targetMembers[targetMembers.length - 1] : undefined;
+                              setMajorStageAssignments({
+                                ...current,
+                                [id]: targetStage,
+                                ...(swappedId ? { [swappedId]: sourceStage } : {})
+                              });
+                            }}
+                            className="max-w-[118px] rounded-lg border border-purple-500/30 bg-slate-950 px-1.5 py-1 text-[10px] text-purple-200"
+                            title="Распределение команд по стартовым слотам Major"
+                          >
+                            <option value={1}>Stage 1</option>
+                            <option value={2}>Stage 2 (direct)</option>
+                            <option value={3}>Stage 3 (direct)</option>
+                          </select>
+                        )}
                         <div className="flex items-center gap-0.5 shrink-0">
                           <button
                             disabled={idx === 0}
@@ -1151,6 +1310,24 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
                   })}
                 </div>
               </div>
+
+              {mode === 'major' && (
+                <div className="rounded-2xl border border-purple-500/30 bg-purple-500/5 p-4 space-y-3">
+                  <div className="text-xs font-bold uppercase tracking-wider text-purple-200">Распределение 32 участников по стадиям</div>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs font-mono">
+                    {[
+                      { stage: 1 as const, count: 16, title: 'Stage 1', subtitle: 'Первая швейцарка' },
+                      { stage: 2 as const, count: 8, title: 'Stage 2', subtitle: '8 прямых + 8 из Stage 1' },
+                      { stage: 3 as const, count: 8, title: 'Stage 3', subtitle: '8 прямых + 8 из Stage 2' }
+                    ].map((item) => (
+                      <div key={item.stage} className="rounded-xl border border-slate-800 bg-slate-950/80 p-3">
+                        <div className="flex items-center justify-between"><span className="font-bold text-white">{item.title}</span><span className={`font-bold ${majorStageCounts[item.stage] === item.count ? 'text-emerald-300' : 'text-rose-300'}`}>{majorStageCounts[item.stage]}/{item.count}</span></div>
+                        <div className="mt-1 text-[10px] text-slate-400">{item.subtitle}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* Available Teams Database with Search & Filters */}
               <div className="space-y-3">
@@ -1249,8 +1426,37 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
 
               <div className="p-4 rounded-2xl bg-slate-900/40 border border-slate-800 space-y-4">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs font-mono">
+                  {mode === 'major' && ([1, 2, 3] as const).map((stageNumber) => {
+                    const normalKey = `majorStage${stageNumber}NormalFormat` as keyof StageFormatSettings;
+                    const deciderKey = `majorStage${stageNumber}DeciderFormat` as keyof StageFormatSettings;
+                    const stageName = stageNumber === 1 ? 'Stage 1 · Первая швейцарка' : stageNumber === 2 ? 'Stage 2 · Вторая швейцарка' : 'Stage 3 · Финальная швейцарка';
+                    return (
+                      <div key={stageNumber} className="col-span-1 sm:col-span-2 rounded-xl border border-purple-500/25 bg-purple-500/5 p-3 space-y-3">
+                        <div className="text-xs font-bold text-purple-200">{stageName}</div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div className="space-y-2">
+                            <span className="block text-slate-300">Обычные матчи (открывающие и промежуточные)</span>
+                            <div className="flex items-center gap-2">
+                              {(['BO1', 'BO3'] as MatchFormat[]).map((f) => (
+                                <button key={f} onClick={() => setStageFormats({ ...stageFormats, [normalKey]: f })} className={`px-3 py-1.5 rounded-lg font-bold transition-colors cursor-pointer ${stageFormats[normalKey] === f ? 'bg-amber-500 text-black' : 'bg-slate-800 text-slate-400 hover:text-white'}`}>{f}</button>
+                              ))}
+                            </div>
+                          </div>
+                          <div className="space-y-2">
+                            <span className="block text-slate-300">Матчи за выход / вылет (счёт 2:0, 2:1, 1:2, 0:2, 2:2)</span>
+                            <div className="flex items-center gap-2">
+                              {(['BO1', 'BO3'] as MatchFormat[]).map((f) => (
+                                <button key={f} onClick={() => setStageFormats({ ...stageFormats, [deciderKey]: f })} className={`px-3 py-1.5 rounded-lg font-bold transition-colors cursor-pointer ${stageFormats[deciderKey] === f ? 'bg-amber-500 text-black' : 'bg-slate-800 text-slate-400 hover:text-white'}`}>{f}</button>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+
                   {/* Swiss / Group stage normal */}
-                  <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800/80 space-y-2">
+                  {mode !== 'major' && <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800/80 space-y-2">
                     <span className="text-slate-300 font-bold block">
                       Групповой / Швейцарский этап (Обычные матчи):
                     </span>
@@ -1273,9 +1479,10 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
                       ))}
                     </div>
                   </div>
+                  }
 
                   {/* Swiss deciders */}
-                  <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800/80 space-y-2">
+                  {mode !== 'major' && <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800/80 space-y-2">
                     <span className="text-slate-300 font-bold block">
                       Матчи за выход / вылет (2:0, 0:2, 2:2):
                     </span>
@@ -1298,6 +1505,7 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
                       ))}
                     </div>
                   </div>
+                  }
 
                   {/* Quarterfinals */}
                   <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800/80 space-y-2">
@@ -1355,16 +1563,18 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
                   <div className="text-xs">
                     <span className="font-bold text-white block">Матч за 3-е место (Бронзовый финал)</span>
                     <span className="text-slate-400 text-[11px]">
-                      {thirdPlaceRequired
-                        ? 'Обязателен для формата с 8 командами в каждой группе: победитель получает 3-е место.'
-                        : 'Проводить матч между проигравшими в полуфинале'}
+                      {mode === 'major'
+                        ? 'В стандартном Major плей-офф Top 8 проходит без матча за 3-е место.'
+                        : thirdPlaceRequired
+                          ? 'Обязателен для формата с 8 командами в каждой группе: победитель получает 3-е место.'
+                          : 'Проводить матч между проигравшими в полуфинале'}
                     </span>
                   </div>
 
                   <button
-                    disabled={thirdPlaceRequired}
+                    disabled={thirdPlaceRequired || mode === 'major'}
                     onClick={() => {
-                      if (thirdPlaceRequired) return;
+                      if (thirdPlaceRequired || mode === 'major') return;
                       soundFx.playClick();
                       setIncludeThirdPlace((p) => !p);
                     }}
@@ -1416,7 +1626,7 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
             ) : (
               <button
                 onClick={handleCreate}
-                disabled={selectedTeamIds.length < 2 || !isGroupLayoutValid}
+                disabled={selectedTeamIds.length < 2 || !isGroupLayoutValid || !isMajorAllocationValid}
                 className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-black text-xs font-black uppercase tracking-wider transition-all shadow-lg shadow-emerald-500/25 active:scale-95 cursor-pointer disabled:opacity-50"
               >
                 <div className="flex items-center gap-2">

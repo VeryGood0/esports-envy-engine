@@ -16,7 +16,6 @@ import { GslGroupsView } from './GslGroupsView';
 import { TournamentSimulationModal } from './TournamentSimulationModal';
 import { TournamentResultsModal } from './TournamentResultsModal';
 import { SwissPairsModal } from './SwissPairsModal';
-import { buildMajorSwissStage } from '../utils/major';
 import { TeamSelector } from './TeamSelector';
 import { CreateTournamentModal } from './CreateTournamentModal';
 import {
@@ -80,8 +79,13 @@ export const TournamentHub: React.FC<TournamentHubProps> = ({
   history = [],
   onOpenDataManagement
 }) => {
-  type StageTab = 'swiss' | 'playoffs' | 'groups';
+  type StageTab = 'swiss' | 'playoffs' | 'groups' | 'major_1' | 'major_2' | 'major_3';
   const getInitialStageTab = (tour?: TournamentState | null): StageTab => {
+    if (tour?.mode === 'major') {
+      if (tour.currentStage === 'playoffs' || tour.currentStage === 'completed' || tour.majorStageNumber === 4) return 'playoffs';
+      const stageNumber = tour.majorStageNumber || 1;
+      return (`major_${stageNumber}` as StageTab);
+    }
     if (tour?.mode === 'gsl_groups' || tour?.mode === 'groups_playoffs') {
       return tour.currentStage === 'playoffs' || tour.currentStage === 'completed' ? 'playoffs' : 'groups';
     }
@@ -106,7 +110,6 @@ export const TournamentHub: React.FC<TournamentHubProps> = ({
   const [activeMatchToSimulate, setActiveMatchToSimulate] = useState<TournamentMatch | null>(null);
   const [isResultsOpen, setIsResultsOpen] = useState(false);
   const [isPairsEditorOpen, setIsPairsEditorOpen] = useState(false);
-  const [viewedMajorStage, setViewedMajorStage] = useState<1 | 2 | 3 | null>(null);
   const [isCreateTournamentOpen, setIsCreateTournamentOpen] = useState(false);
 
   // Manual team slot picker state
@@ -384,20 +387,26 @@ export const TournamentHub: React.FC<TournamentHubProps> = ({
                 onClick={() => {
                   soundFx.playClick();
                   const sorted = [...teams].sort((a, b) => b.points - a.points);
+                  const majorTeams = sorted.slice(0, 32);
+                  const majorStageAssignments = Object.fromEntries(majorTeams.map((team, index) => [
+                    team.id,
+                    (index < 16 ? 1 : index < 24 ? 2 : 3) as 1 | 2 | 3
+                  ]));
                   const tour = createCustomTournament({
                     name: 'Valve CS2 Major Championship 2026',
                     shortName: 'MAJOR 2026',
                     organizer: 'PGL / Valve',
                     prizePool: '$1,250,000',
                     tier: 'Major',
-                    mode: 'swiss_playoffs',
-                    teams: sorted.slice(0, 16),
+                    mode: 'major',
+                    teams: majorTeams,
+                    majorStageAssignments,
                     stageFormats: {
-                      swissNormalFormat: 'BO1',
-                      swissDeciderFormat: 'BO3',
-                      quarterfinalFormat: 'BO3',
-                      semifinalFormat: 'BO3',
-                      finalFormat: 'BO5'
+                      majorStage1NormalFormat: 'BO1', majorStage1DeciderFormat: 'BO3',
+                      majorStage2NormalFormat: 'BO1', majorStage2DeciderFormat: 'BO3',
+                      majorStage3NormalFormat: 'BO3', majorStage3DeciderFormat: 'BO3',
+                      swissNormalFormat: 'BO1', swissDeciderFormat: 'BO3',
+                      quarterfinalFormat: 'BO3', semifinalFormat: 'BO3', finalFormat: 'BO5'
                     },
                     includeThirdPlace: false
                   });
@@ -419,7 +428,7 @@ export const TournamentHub: React.FC<TournamentHubProps> = ({
                     Valve CS2 Major 2026
                   </h4>
                   <p className="text-[11px] text-slate-400 mt-1 line-clamp-2">
-                    16 команд · Швейцарка BO1/BO3 и арена плей-офф Top-8 с финалом BO5
+                    32 команды · три швейцарских Stage и плей-офф Top 8
                   </p>
                 </div>
                 <div className="mt-3 pt-2.5 border-t border-purple-500/20 text-[11px] font-mono font-bold text-purple-300 flex items-center justify-between">
@@ -594,7 +603,24 @@ export const TournamentHub: React.FC<TournamentHubProps> = ({
   // 1. Switch tournament mode
   const handleChangeMode = (mode: TournamentMode) => {
     soundFx.playClick();
-    if (mode === 'swiss_playoffs') {
+    if (mode === 'major') {
+      const seeded = [...teams].sort((a, b) => b.points - a.points).slice(0, 32);
+      const assignments = Object.fromEntries(seeded.map((team, index) => [team.id, (index < 16 ? 1 : index < 24 ? 2 : 3) as 1 | 2 | 3]));
+      const newTour = createCustomTournament({
+        name: 'Valve CS2 Major Championship 2026', shortName: 'MAJOR 2026', organizer: 'PGL / Valve',
+        prizePool: '$1,250,000', tier: 'Major', mode: 'major', teams: seeded,
+        majorStageAssignments: assignments,
+        stageFormats: {
+          majorStage1NormalFormat: 'BO1', majorStage1DeciderFormat: 'BO3',
+          majorStage2NormalFormat: 'BO1', majorStage2DeciderFormat: 'BO3',
+          majorStage3NormalFormat: 'BO3', majorStage3DeciderFormat: 'BO3',
+          quarterfinalFormat: 'BO3', semifinalFormat: 'BO3', finalFormat: 'BO5'
+        },
+        includeThirdPlace: false
+      });
+      onUpdateTournament(newTour);
+      setActiveStageTab('major_1');
+    } else if (mode === 'swiss_playoffs') {
       const newTour = createInitialSwissTournament(teams, false, tournament.includeThirdPlace);
       onUpdateTournament(newTour);
       setActiveStageTab('swiss');
@@ -605,10 +631,36 @@ export const TournamentHub: React.FC<TournamentHubProps> = ({
     }
   };
 
+  const rebuildMajorWithSeedOrder = (seedOrder: Team[]) => {
+    const assignmentMap: Record<string, 1 | 2 | 3> = {};
+    (tournament.majorStages || []).forEach((stage) => {
+      stage.directTeamIds.forEach((teamId) => { assignmentMap[teamId] = stage.stageNumber; });
+    });
+    const newTour = createCustomTournament({
+      name: tournament.name || 'Valve CS2 Major Championship 2026',
+      shortName: tournament.shortName || 'MAJOR 2026',
+      organizer: tournament.organizer,
+      prizePool: tournament.prizePool,
+      startDate: tournament.startDate,
+      description: tournament.description,
+      tier: 'Major',
+      mode: 'major',
+      teams: seedOrder,
+      stageFormats: tournament.stageFormats || {},
+      includeThirdPlace: false,
+      majorStageAssignments: assignmentMap
+    });
+    onUpdateTournament(newTour);
+    setActiveStageTab('major_1');
+  };
+
   // 2. Randomize teams in tournament
   const handleRandomizeTournament = () => {
     soundFx.playClick();
-    if (tournament.mode === 'swiss_playoffs') {
+    if (tournament.mode === 'major') {
+      const participants = (tournament.participatingTeamIds || []).map((id) => teams.find((team) => team.id === id)).filter(Boolean) as Team[];
+      rebuildMajorWithSeedOrder([...participants].sort(() => Math.random() - 0.5));
+    } else if (tournament.mode === 'swiss_playoffs') {
       const newTour = createInitialSwissTournament(teams, true, tournament.includeThirdPlace);
       onUpdateTournament(newTour);
       setActiveStageTab('swiss');
@@ -622,7 +674,10 @@ export const TournamentHub: React.FC<TournamentHubProps> = ({
   // 3. Reset to default rating seeding
   const handleSeedByRating = () => {
     soundFx.playClick();
-    if (tournament.mode === 'swiss_playoffs') {
+    if (tournament.mode === 'major') {
+      const participants = (tournament.participatingTeamIds || []).map((id) => teams.find((team) => team.id === id)).filter(Boolean) as Team[];
+      rebuildMajorWithSeedOrder([...participants].sort((a, b) => b.points - a.points));
+    } else if (tournament.mode === 'swiss_playoffs') {
       const newTour = createInitialSwissTournament(teams, false, tournament.includeThirdPlace);
       onUpdateTournament(newTour);
       setActiveStageTab('swiss');
@@ -633,31 +688,73 @@ export const TournamentHub: React.FC<TournamentHubProps> = ({
     }
   };
 
-  // 4. Reset Round 1 Swiss matches to default pairings
+  // 4. Reset Round 1 Swiss matches to default pairings.
+  // A Major uses the official 1-vs-9, 2-vs-10 ... 8-vs-16 pairing inside
+  // the currently active stage, never the generic 16-team Swiss roster.
   const handleResetDefaultPairs = () => {
     soundFx.playClick();
-    if (tournament.isMajor) {
-      const stage = tournament.majorStage || 1;
-      const seededIds = Object.values(tournament.swissRecords)
-        .sort((a, b) => (a.seedRank || 99) - (b.seedRank || 99))
-        .map((r) => r.teamId);
-      const fmt = tournament.majorStageFormats?.[`stage${stage}`] || { normalFormat: 'BO1', deciderFormat: 'BO3' };
-      const rebuilt = buildMajorSwissStage(stage, seededIds, fmt, tournament.id);
-      onUpdateTournament({ ...tournament, swissMatches: rebuilt.swissMatches, swissRound: 1 });
+    if (tournament.mode === 'major') {
+      const stageNumber = (tournament.majorStageNumber || 1) as 1 | 2 | 3;
+      const stage = tournament.majorStages?.[stageNumber - 1];
+      const records = Object.values(tournament.swissRecords || {}).sort((a, b) => (a.seedRank || 999) - (b.seedRank || 999));
+      const stageTeamIds = records.map((record) => record.teamId);
+      if (stageTeamIds.length !== 16) return;
+      const firstRound = tournament.swissMatches.filter((match) => match.roundNumber === 1);
+      const normalFormat = stageNumber === 1
+        ? tournament.stageFormats?.majorStage1NormalFormat
+        : stageNumber === 2
+          ? tournament.stageFormats?.majorStage2NormalFormat
+          : tournament.stageFormats?.majorStage3NormalFormat;
+      const resetRound = Array.from({ length: 8 }, (_, index) => {
+        const previous = firstRound[index];
+        return {
+          ...(previous || {}),
+          id: `${tournament.id}_major_s${stageNumber}_r1_m${index + 1}`,
+          stage: 'swiss' as const,
+          poolKey: '0:0',
+          roundNumber: 1,
+          name: `Stage ${stageNumber} · Раунд 1 (0:0) · Матч ${index + 1}`,
+          teamAId: stageTeamIds[index],
+          teamBId: stageTeamIds[index + 8],
+          scoreA: 0,
+          scoreB: 0,
+          winnerId: undefined,
+          loserId: undefined,
+          status: 'ready' as const,
+          format: normalFormat === 'BO3' ? 'BO3' as const : 'BO1' as const
+        };
+      });
+      const resetRecords = Object.fromEntries(stageTeamIds.map((teamId, index) => [teamId, {
+        teamId, wins: 0, losses: 0, opponentsPlayed: [], status: 'active' as const, seedRank: index + 1
+      }]));
+      const updatedStages = [...(tournament.majorStages || [])];
+      if (stage) {
+        updatedStages[stageNumber - 1] = {
+          ...stage,
+          matches: [...resetRound],
+          records: resetRecords,
+          currentRound: 1,
+          status: 'active'
+        };
+      }
+      onUpdateTournament({
+        ...tournament,
+        majorStages: updatedStages,
+        swissMatches: resetRound,
+        swissRecords: resetRecords,
+        swissRound: 1,
+        currentStage: 'swiss'
+      });
       return;
     }
     const defaultR1 = createDefaultSwissRound1Matches(teams);
-    onUpdateTournament({
-      ...tournament,
-      swissMatches: defaultR1,
-      swissRound: 1
-    });
+    onUpdateTournament({ ...tournament, swissMatches: defaultR1, swissRound: 1 });
   };
 
   // 5. Swap Team A and Team B in a match
   const handleSwapMatchTeams = (matchId: string) => {
     soundFx.playClick();
-    if (tournament.mode === 'swiss_playoffs' && tournament.currentStage === 'swiss') {
+    if ((tournament.mode === 'swiss_playoffs' || tournament.mode === 'major') && tournament.currentStage === 'swiss') {
       const updated = tournament.swissMatches.map((m) => {
         if (m.id === matchId) {
           return { ...m, teamAId: m.teamBId, teamBId: m.teamAId };
@@ -928,6 +1025,8 @@ export const TournamentHub: React.FC<TournamentHubProps> = ({
         nextTour = advanceSwissRound(nextTour, teams);
         if (nextTour.currentStage === 'playoffs') {
           setActiveStageTab('playoffs');
+        } else if (nextTour.mode === 'major') {
+          setActiveStageTab((`major_${nextTour.majorStageNumber || 1}`) as StageTab);
         }
       }
 
@@ -1053,41 +1152,45 @@ export const TournamentHub: React.FC<TournamentHubProps> = ({
   // Toggle match format on ready match (BO1 <-> BO3 <-> BO5)
   const handleToggleMatchFormat = (matchId: string) => {
     soundFx.playClick();
-    const cycleFormat = (fmt: MatchFormat): MatchFormat => {
+    const isSwiss = tournament.swissMatches.some((m) => m.id === matchId);
+    const isGroup = tournament.groupMatches?.some((m) => m.id === matchId);
+    const cycleFormat = (fmt: MatchFormat, match?: TournamentMatch): MatchFormat => {
+      if (tournament.mode === 'major') {
+        // Keep the Major grand final on BO3/BO5; Swiss matches stay BO1/BO3.
+        if (match?.poolKey === 'final') return fmt === 'BO5' ? 'BO3' : 'BO5';
+        return fmt === 'BO1' ? 'BO3' : 'BO1';
+      }
       if (fmt === 'BO1') return 'BO3';
       if (fmt === 'BO3') return 'BO5';
       return 'BO1';
     };
 
-    const isSwiss = tournament.swissMatches.some((m) => m.id === matchId);
-    const isGroup = tournament.groupMatches?.some((m) => m.id === matchId);
-
     if (isSwiss) {
       const updated = tournament.swissMatches.map((m) =>
-        m.id === matchId && m.status !== 'finished' ? { ...m, format: cycleFormat(m.format) } : m
+        m.id === matchId && m.status !== 'finished' ? { ...m, format: cycleFormat(m.format, m) } : m
       );
       onUpdateTournament({ ...tournament, swissMatches: updated });
     } else if (isGroup) {
       const updated = (tournament.groupMatches || []).map((m) =>
-        m.id === matchId && m.status !== 'finished' ? { ...m, format: cycleFormat(m.format) } : m
+        m.id === matchId && m.status !== 'finished' ? { ...m, format: cycleFormat(m.format, m) } : m
       );
       const updatedGroups = (tournament.groups || []).map((g) => ({
         ...g,
         matches: g.matches.map((m) =>
-          m.id === matchId && m.status !== 'finished' ? { ...m, format: cycleFormat(m.format) } : m
+          m.id === matchId && m.status !== 'finished' ? { ...m, format: cycleFormat(m.format, m) } : m
         )
       }));
       onUpdateTournament({ ...tournament, groupMatches: updated, groups: updatedGroups });
     } else {
       const updated = tournament.playoffMatches.map((m) =>
-        m.id === matchId && m.status !== 'finished' ? { ...m, format: cycleFormat(m.format) } : m
+        m.id === matchId && m.status !== 'finished' ? { ...m, format: cycleFormat(m.format, m) } : m
       );
       onUpdateTournament({ ...tournament, playoffMatches: updated });
     }
 
     if (activeMatchToSimulate && activeMatchToSimulate.id === matchId) {
       setActiveMatchToSimulate((prev) =>
-        prev ? { ...prev, format: cycleFormat(prev.format) } : null
+        prev ? { ...prev, format: cycleFormat(prev.format, prev) } : null
       );
     }
   };
@@ -1148,7 +1251,7 @@ export const TournamentHub: React.FC<TournamentHubProps> = ({
   // 13. Fast simulate entire current active round on CS2 maps
   const handleFastSimulateRound = () => {
     soundFx.playClick();
-    if (tournament.mode === 'swiss_playoffs' && tournament.currentStage === 'swiss') {
+    if ((tournament.mode === 'swiss_playoffs' || tournament.mode === 'major') && tournament.currentStage === 'swiss') {
       const roundMatches = tournament.swissMatches.filter(
         (m) => m.roundNumber === tournament.swissRound && m.status !== 'finished' && m.teamAId && m.teamBId
       );
@@ -1207,6 +1310,8 @@ export const TournamentHub: React.FC<TournamentHubProps> = ({
       nextTour = advanceSwissRound(nextTour, teams);
       if (nextTour.currentStage === 'playoffs') {
         setActiveStageTab('playoffs');
+      } else if (nextTour.mode === 'major') {
+        setActiveStageTab((`major_${nextTour.majorStageNumber || 1}`) as StageTab);
       }
       onUpdateTournament(nextTour);
       soundFx.playVictory();
@@ -1283,9 +1388,9 @@ export const TournamentHub: React.FC<TournamentHubProps> = ({
     let currentTour = { ...tournament };
 
     // Advance swiss completely
-    if (currentTour.mode === 'swiss_playoffs' && currentTour.currentStage === 'swiss') {
+    if ((currentTour.mode === 'swiss_playoffs' || currentTour.mode === 'major') && currentTour.currentStage === 'swiss') {
       let loops = 0;
-      while (currentTour.currentStage === 'swiss' && loops < 20) {
+      while (currentTour.currentStage === 'swiss' && loops < (currentTour.mode === 'major' ? 20 : 10)) {
         loops++;
         const activeRound = currentTour.swissRound;
         const matchesInRound = currentTour.swissMatches.filter(
@@ -1490,6 +1595,13 @@ export const TournamentHub: React.FC<TournamentHubProps> = ({
       currentTour = finalizeTournamentVictory(currentTour);
     }
 
+    if (currentTour.mode === 'major') {
+      setActiveStageTab(currentTour.currentStage === 'swiss'
+        ? (`major_${currentTour.majorStageNumber || 1}`) as StageTab
+        : 'playoffs');
+    } else if (currentTour.currentStage === 'playoffs' || currentTour.currentStage === 'completed') {
+      setActiveStageTab('playoffs');
+    }
     onUpdateTournament(currentTour);
     soundFx.playVictory();
   };
@@ -1547,7 +1659,7 @@ export const TournamentHub: React.FC<TournamentHubProps> = ({
       return;
     }
 
-    if (tournament.mode === 'swiss_playoffs' && tournament.currentStage === 'swiss') {
+    if ((tournament.mode === 'swiss_playoffs' || tournament.mode === 'major') && tournament.currentStage === 'swiss') {
       const updated = swapSwissRoundMatches(tournament.swissMatches, matchId, slot, selectedTeam.id);
       onUpdateTournament({ ...tournament, swissMatches: updated });
     } else {
@@ -1572,24 +1684,13 @@ export const TournamentHub: React.FC<TournamentHubProps> = ({
   const eligiblePickerTeams = groupOfCurrentPicker
     ? (groupOfCurrentPicker.teamIds?.map((id) => teams.find((t) => t.id === id)).filter(Boolean) as Team[]) || teams
     : activeStageTab === 'playoffs' &&
-      tournament.mode === 'swiss_playoffs' &&
+      (tournament.mode === 'swiss_playoffs' || tournament.mode === 'major') &&
       tournament.linkPlayoffsToSwiss !== false &&
       qualifiedSwissTeams.length === 8
     ? qualifiedSwissTeams
     : teams;
 
   const isCompleted = tournament.currentStage === 'completed';
-  const majorCurrentStageTeams = Object.keys(tournament.swissRecords || {})
-    .map((id) => teams.find((t) => t.id === id))
-    .filter(Boolean) as Team[];
-  const majorArchiveView = tournament.isMajor
-    ? (() => {
-        const current = tournament.currentStage === 'swiss' ? tournament.majorStage || 1 : 4;
-        const target = viewedMajorStage ?? (current === 4 ? 3 : null);
-        if (target == null || target === current) return null;
-        return tournament.majorHistory?.find((h) => h.stage === target) || null;
-      })()
-    : null;
 
   return (
     <div className="w-full space-y-6 animate-in fade-in duration-200">
@@ -1633,6 +1734,17 @@ export const TournamentHub: React.FC<TournamentHubProps> = ({
               >
                 <GitBranch className="w-3.5 h-3.5" />
                 <span>Только Плей-офф (Сетка)</span>
+              </button>
+              <button
+                onClick={() => handleChangeMode('major')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                  tournament.mode === 'major'
+                    ? 'bg-purple-500 text-white font-bold shadow-sm'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <Trophy className="w-3.5 h-3.5" />
+                <span>Valve Major · 3 Stage</span>
               </button>
             </div>
           </div>
@@ -1814,6 +1926,36 @@ export const TournamentHub: React.FC<TournamentHubProps> = ({
         </div>
       )}
 
+      {/* Major stage navigation: 3 Swiss stages + playoff bracket */}
+      {tournament.mode === 'major' && (
+        <div className="flex flex-wrap items-center gap-2 border-b border-slate-800 pb-3">
+          {([
+            { tab: 'major_1' as StageTab, label: 'Stage 1 · Swiss', index: 1 },
+            { tab: 'major_2' as StageTab, label: 'Stage 2 · Swiss', index: 2 },
+            { tab: 'major_3' as StageTab, label: 'Stage 3 · Swiss', index: 3 },
+            { tab: 'playoffs' as StageTab, label: 'Playoffs · Top 8', index: 4 }
+          ]).map((item) => {
+            const stage = item.index < 4 ? tournament.majorStages?.[item.index - 1] : undefined;
+            const isActive = activeStageTab === item.tab;
+            const statusLabel = item.index === 4
+              ? (tournament.currentStage === 'playoffs' || tournament.currentStage === 'completed' ? 'Активно' : 'Далее')
+              : stage?.status === 'completed' ? 'Готово' : stage?.status === 'active' ? `Раунд ${isActive ? tournament.swissRound : stage.currentRound}/5` : 'Ожидание';
+            return (
+              <button
+                key={item.tab}
+                onClick={() => { soundFx.playClick(); setActiveStageTab(item.tab); }}
+                className={`flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-bold font-mono transition-all cursor-pointer ${isActive
+                  ? 'bg-purple-500 text-white border-purple-400 shadow-md shadow-purple-500/10'
+                  : 'bg-slate-900/80 text-slate-400 border-slate-800 hover:text-white'} ${stage?.status === 'waiting' ? 'opacity-80' : ''}`}
+              >
+                <span>{item.label}</span>
+                <span className={`rounded px-1.5 py-0.5 text-[9px] ${isActive ? 'bg-black/20 text-white' : stage?.status === 'completed' ? 'bg-emerald-500/10 text-emerald-300' : 'bg-slate-800 text-slate-500'}`}>{statusLabel}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       {/* Stage Navigation Switcher (for Swiss + Playoffs Mode) */}
       {tournament.mode === 'swiss_playoffs' && (
         <div className="flex items-center justify-between border-b border-slate-800 pb-3">
@@ -1830,7 +1972,7 @@ export const TournamentHub: React.FC<TournamentHubProps> = ({
               }`}
             >
               <Grid className="w-4 h-4" />
-              <span>{tournament.isMajor ? `1. Swiss · Stage ${tournament.currentStage === 'swiss' ? tournament.majorStage || 1 : '1–3'}` : '1. Swiss Stage (Швейцарка)'}</span>
+              <span>1. Swiss Stage (Швейцарка)</span>
               {tournament.currentStage === 'swiss' && (
                 <span className="px-1.5 py-0.5 rounded text-[10px] bg-black/30 text-black font-mono">
                   Раунд {tournament.swissRound}/5
@@ -1917,58 +2059,54 @@ export const TournamentHub: React.FC<TournamentHubProps> = ({
       )}
 
       {/* Main Stage Rendering */}
-      {tournament.mode === 'swiss_playoffs' && activeStageTab === 'swiss' && tournament.isMajor && (
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-xs font-mono text-slate-400">Этап мейджора:</span>
-          {([1, 2, 3] as const).map((st) => {
-            const current = tournament.currentStage === 'swiss' ? tournament.majorStage || 1 : 4;
-            const archived = tournament.majorHistory?.some((h) => h.stage === st);
-            const isCurrentStage = st === current;
-            const available = archived || isCurrentStage;
-            const selected = (viewedMajorStage ?? current) === st || (viewedMajorStage == null && current === 4 && st === 3);
-            return (
-              <button
-                key={st}
-                disabled={!available}
-                onClick={() => {
-                  soundFx.playClick();
-                  setViewedMajorStage(isCurrentStage ? null : st);
-                }}
-                className={`px-3 py-1.5 rounded-lg text-xs font-mono font-bold border transition-colors ${
-                  selected
-                    ? 'bg-amber-500 text-black border-amber-500'
-                    : available
-                    ? 'bg-slate-900 text-slate-300 border-slate-700 hover:text-white cursor-pointer'
-                    : 'bg-slate-950 text-slate-600 border-slate-800 cursor-not-allowed'
-                }`}
-              >
-                Stage {st}
-                {isCurrentStage ? ' · идёт' : archived ? ' · завершён' : ` · ${st === 2 ? '8 приглашённых' : '8 приглашённых'}`}
-              </button>
-            );
-          })}
-          <span className="text-[11px] font-mono text-slate-500">
-            Stage 1 → 8 в Stage 2 → 8 в Stage 3 → 8 в плей-офф
-          </span>
-        </div>
-      )}
-
-      {tournament.mode === 'swiss_playoffs' && activeStageTab === 'swiss' && tournament.isMajor && majorArchiveView ? (
-        <SwissStageView
-          matches={majorArchiveView.swissMatches}
-          records={majorArchiveView.swissRecords}
-          teams={teams}
-          currentRound={6}
-          onOpenMatch={() => {}}
-          onQuickSimulateMatch={() => {}}
-          onSelectManualSlot={() => {}}
-          onSwapMatchTeams={() => {}}
-          onResetDefaultPairs={() => {}}
-          onOpenPairsEditor={() => {}}
-          onAdvanceToPlayoffs={() => setViewedMajorStage(null)}
-          onToggleMatchFormat={() => {}}
-        />
-      ) : tournament.mode === 'swiss_playoffs' && activeStageTab === 'swiss' ? (
+      {tournament.mode === 'major' && activeStageTab !== 'playoffs' ? (() => {
+        const stageNumber = activeStageTab === 'major_1' ? 1 : activeStageTab === 'major_2' ? 2 : 3;
+        const savedStage = tournament.majorStages?.[stageNumber - 1];
+        const isCurrentStage = tournament.currentStage === 'swiss' && (tournament.majorStageNumber || 1) === stageNumber;
+        const stageMatches = isCurrentStage ? tournament.swissMatches : (savedStage?.matches || []);
+        const stageRecords = isCurrentStage ? tournament.swissRecords : (savedStage?.records || {});
+        const nextStageName = stageNumber === 1 ? 'Stage 2' : stageNumber === 2 ? 'Stage 3' : 'плей-офф';
+        if (!savedStage || savedStage.status === 'waiting') {
+          const directTeams = (savedStage?.directTeamIds || []).map((id) => teams.find((team) => team.id === id)).filter(Boolean) as Team[];
+          return (
+            <div className="space-y-4 rounded-3xl border border-purple-500/20 bg-[#090d15] p-5 sm:p-7">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-lg font-extrabold text-white">{savedStage?.name || `Stage ${stageNumber}`}</h3>
+                  <p className="mt-1 max-w-2xl text-xs leading-relaxed text-slate-400">Этап ещё не начался. 8 команд с прямыми приглашениями уже распределены по посеву; после предыдущей швейцарки к ним присоединятся 8 прошедших команд.</p>
+                </div>
+                <span className="rounded-xl border border-purple-500/30 bg-purple-500/10 px-3 py-2 text-xs font-mono font-bold text-purple-200">{directTeams.length}/8 прямых участников</span>
+              </div>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                {directTeams.map((team, index) => (
+                  <div key={team.id} className="flex items-center gap-3 rounded-xl border border-slate-800 bg-slate-900/70 p-3">
+                    <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-purple-500/15 text-[11px] font-bold text-purple-200">{index + 1}</span>
+                    <div className="min-w-0"><div className="truncate text-sm font-bold text-white">{team.name}</div><div className="text-[10px] text-slate-500">Прямое приглашение</div></div>
+                  </div>
+                ))}
+              </div>
+              <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-3 text-xs leading-relaxed text-slate-400">Первая пара после открытия этапа: посевы 1–8 против посевов 9–16. Все матчи распределяются по одинаковому счёту W–L, а повторные встречи в пределах этапа исключаются, если существует допустимая альтернативная жеребьёвка.</div>
+            </div>
+          );
+        }
+        return (
+          <SwissStageView
+            matches={stageMatches}
+            records={stageRecords}
+            teams={teams}
+            currentRound={isCurrentStage ? tournament.swissRound : savedStage.currentRound}
+            nextStageName={nextStageName}
+            onOpenMatch={isCurrentStage ? (match) => setActiveMatchToSimulate(match) : () => {}}
+            onQuickSimulateMatch={isCurrentStage ? handleQuickSimulateMatch : undefined}
+            onSelectManualSlot={isCurrentStage ? (matchId, slot) => setManualSlotPicker({ matchId, slot }) : undefined}
+            onSwapMatchTeams={isCurrentStage ? handleSwapMatchTeams : undefined}
+            onResetDefaultPairs={isCurrentStage && (tournament.mode !== 'major' || tournament.swissRound === 1) ? handleResetDefaultPairs : undefined}
+            onOpenPairsEditor={isCurrentStage && (tournament.mode !== 'major' || tournament.swissRound === 1) ? () => setIsPairsEditorOpen(true) : undefined}
+            onAdvanceToPlayoffs={isCurrentStage && stageNumber === 3 ? () => setActiveStageTab('playoffs') : undefined}
+            onToggleMatchFormat={isCurrentStage ? handleToggleMatchFormat : undefined}
+          />
+        );
+      })() : tournament.mode === 'swiss_playoffs' && activeStageTab === 'swiss' ? (
         <SwissStageView
           matches={tournament.swissMatches}
           records={tournament.swissRecords}
@@ -1998,19 +2136,20 @@ export const TournamentHub: React.FC<TournamentHubProps> = ({
         <PlayoffsStageView
           matches={tournament.playoffMatches}
           teams={teams}
-          isFromSwiss={tournament.mode === 'swiss_playoffs'}
+          isFromSwiss={tournament.mode === 'swiss_playoffs' || tournament.mode === 'major'}
           linkPlayoffsToSwiss={tournament.linkPlayoffsToSwiss !== false}
-          onToggleLinkSwiss={handleToggleLinkSwiss}
+          onToggleLinkSwiss={tournament.mode === 'major' ? undefined : handleToggleLinkSwiss}
           qualifiedRecords={Object.values(tournament.swissRecords).filter((r) => r.status === 'qualified')}
           includeThirdPlace={tournament.includeThirdPlace || isEightTeamGslTournament(tournament)}
           thirdPlaceRequired={isEightTeamGslTournament(tournament)}
-          onToggleThirdPlace={handleToggleThirdPlace}
+          onToggleThirdPlace={tournament.mode === 'major' ? () => {} : handleToggleThirdPlace}
+          hideThirdPlaceToggle={tournament.mode === 'major'}
           onOpenMatch={(m) => setActiveMatchToSimulate(m)}
           onQuickSimulateMatch={handleQuickSimulateMatch}
           onSelectManualSlot={(matchId, slot) => setManualSlotPicker({ matchId, slot })}
-          onResetToSwissSeeding={handleResetToSwissSeeding}
-          onRandomizePlayoffTeams={handleRandomizePlayoffTeams}
-          onSeedTop8VRS={handleSeedTop8VRS}
+          onResetToSwissSeeding={tournament.mode === 'major' ? undefined : handleResetToSwissSeeding}
+          onRandomizePlayoffTeams={tournament.mode === 'major' ? undefined : handleRandomizePlayoffTeams}
+          onSeedTop8VRS={tournament.mode === 'major' ? undefined : handleSeedTop8VRS}
           onToggleMatchFormat={handleToggleMatchFormat}
         />
       )}
@@ -2060,7 +2199,9 @@ export const TournamentHub: React.FC<TournamentHubProps> = ({
           onCreateTournament={(newTour) => {
             onUpdateTournament(newTour);
             setIsCreateTournamentOpen(false);
-            if (
+            if (newTour.mode === 'major') {
+              setActiveStageTab('major_1');
+            } else if (
               newTour.mode === 'playoffs_only' ||
               newTour.mode === 'single_elimination' ||
               newTour.mode === 'double_elimination'
@@ -2078,7 +2219,7 @@ export const TournamentHub: React.FC<TournamentHubProps> = ({
         isOpen={isPairsEditorOpen}
         onClose={() => setIsPairsEditorOpen(false)}
         matches={tournament.swissMatches.filter((m) => m.roundNumber === 1)}
-        teams={tournament.isMajor ? majorCurrentStageTeams : teams}
+        teams={teams}
         onSaveMatches={(newR1Matches) => {
           onUpdateTournament({
             ...tournament,

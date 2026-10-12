@@ -24,6 +24,7 @@ interface PlayoffsStageViewProps {
   qualifiedRecords?: SwissTeamRecord[];
   includeThirdPlace: boolean;
   thirdPlaceRequired?: boolean;
+  hideThirdPlaceToggle?: boolean;
   onToggleThirdPlace: () => void;
   onOpenMatch: (match: TournamentMatch) => void;
   onQuickSimulateMatch?: (match: TournamentMatch) => void;
@@ -43,6 +44,7 @@ export const PlayoffsStageView: React.FC<PlayoffsStageViewProps> = ({
   qualifiedRecords = [],
   includeThirdPlace,
   thirdPlaceRequired = false,
+  hideThirdPlaceToggle = false,
   onToggleThirdPlace,
   onOpenMatch,
   onQuickSimulateMatch,
@@ -441,7 +443,8 @@ export const PlayoffsStageView: React.FC<PlayoffsStageViewProps> = ({
         </div>
       </div>
 
-      {/* SECTION 2: 3rd Place Decider Match (Photo 2 Bottom Part) */}
+      {/* SECTION 2: 3rd Place Decider Match (not used for Major format) */}
+      {!hideThirdPlaceToggle && (
       <div className="bg-[#090d15] border border-slate-800 rounded-3xl p-6 shadow-2xl">
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-slate-800 pb-4 mb-5">
           <div className="flex items-center gap-2.5">
@@ -500,6 +503,7 @@ export const PlayoffsStageView: React.FC<PlayoffsStageViewProps> = ({
           </div>
         )}
       </div>
+      )}
     </div>
   );
 };
